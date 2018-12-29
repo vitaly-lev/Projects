@@ -1,0 +1,4269 @@
+	WIDTH	90
+	PGLEN	59
+	TITLE	"PROGRAMM FOR PROGRAMMER ON 8048"
+	SBTTL	"MAIN CODE"
+;
+;************************************************
+;						*
+;	   COPYRIGHT <C>     <LION>		*
+;						*
+;	    910521	VERS 1.0		*
+;						*
+;************************************************
+;!!! in 27256 mode delay between verify & prg pulse must be 150mkS (now 100)
+;tcom:
+;prg.bat - create .prn .err
+;pa.bat  - create prg.e
+;
+;
+RDR48	EQU	0	;FLAG FOR 8748 CPU
+PRG48	EQU	1	;FLAG FOR 8748 CPU
+;
+TMPRA	EQU	R7	;(RB0 & RB1) TEMP registry for A registry
+TMPR	EQU	R7	;(RB0) TEMP registry (only for debug program)
+;
+DELAYR	EQU	R6	;(RB0) Registry for Delay subroutines
+COUNT	EQU	R6	;(RB0) TEMP registry for MULTIPY subroutine
+;INGRP	EQU	R6	;R3	;(RB0) TEMP registry for subroutine REGIME
+TMPTX	EQU	R6	;R3	;(RB0) TEMP registry for TMP save TX byte
+TXB	EQU	R6	;(RB1) TRANSMITT BYTE
+;
+TMPKEY	EQU	R5	;(RB0) Registry for TMP story down keys ;!!! NOT USE (PROC PROGRAM BYTE)
+ATTEMP	EQU	R5	;(RB0) NUMBER attempts for programming bits
+RNAK	EQU	R5	;(RB0) For NAK counter
+TESTR	EQU	R5	;(RB0) Temporary reg for TEST subroutines
+TXBC	EQU	R5	;(RB1) Transmitt bytes counter
+DELRX	EQU	R5	;(RB1) For subroutine RXONEB
+;
+TIME	EQU	R4	;(RB0) TEMP registry for subroutine REGIME
+CSUM	EQU	R4	;(RB0) Control SUM
+MS	EQU	R4	;(RB1) TIME constant
+;
+INGRP	EQU	R3	;(RB0) TEMP registry for subroutine REGIME
+RXCOM	EQU	R3	;(RB0) Number attempts for RX command
+RXBIC	EQU	R3	;(RB1) Receive bites counter
+;
+GRP	EQU	R2	;(RB0) TEMP registry for subroutine REGIME
+PC	EQU	R2	;(RB0) number prg impulses for PRG NUMBER bytes
+RXBYC	EQU	R2	;(RB1) Receive bytes counter
+;
+RXBA	EQU	R0	;(RB1) Address for receiving byte 
+;
+;
+;---
+;
+XTL	EQU	6400		;Xtal frequency in mGh (6400=6.4mGh)
+X2	EQU	((10000/((XTL/10)/3))*16)/10
+X3	EQU	(((10000/((XTL/10)/3))*15)/10)*3	;3's Comand after
+							;timer interrupt
+;
+;---SET 38400
+;
+TXSPEED	SET	38400		;Transmitt speed
+X1	SET	((10000/(TXSPEED/100))*10)
+TD38	EQU	(NOT((X1-X3)/X2))+1			;!!!
+;
+;
+;---SET 19200
+;
+TXSPEED	SET	9600 ;19200		;Transmitt speed
+X1	SET	((10000/(TXSPEED/100))*10)
+TD19	EQU	(NOT((X1-X3)/X2))+1			;!!!
+;
+;
+;---SET 9600
+;
+TXSPEED	SET	9600		;Transmitt speed
+X1	SET	((10000/(TXSPEED/100))*10)
+TD96	EQU	(NOT((X1-X3)/X2))+1			;!!!
+;
+;
+;---SET 1200
+;
+TXSPEED	SET	9600		;Transmitt speed
+X1	SET	((10000/(TXSPEED/100))*10)
+TD12	EQU	(NOT((X1-X3)/X2))+1			;!!!
+;
+;---
+;
+;DBIT05	EQU		((X1-X3)/X2)/2				;1/2 DBIT
+;DBIT15	EQU	NOT 80	;(NOT(((X1-X3)/X2) + (((X1-X3)/X2)/2)))+7;1.5 DBIT !!!
+;
+;RDBIT	EQU	0F5H	;NOT 52 f4
+;RDBIT15	EQU	0F6H	;NOT 76	F8
+;
+TR38  	EQU	0F5H
+T15R38	EQU	0F6H
+;
+TR19	EQU	0F5H	;0FBH
+T15R19	EQU	0FAH	;0FEH
+;
+TR96	EQU	0F5H	;f5
+T15R96	EQU	0FAH	;f6
+;
+TR12	EQU	0F5H
+T15R12	EQU	0F6H
+;
+;---
+;
+;
+;---
+;	104mkS - delay between 
+;	TX bits (9600)
+;---
+XCMOS	EQU	20
+X15	EQU	15		;MAX Number attempt for programming 
+X25	EQU	25
+TREGIME	EQU	300/20
+TFAILED	EQU	150/20
+B2716	EQU	2048
+B2732	EQU	2*B2716
+B2764	EQU	2*B2732
+B27128	EQU	2*B2764
+B27256	EQU	2*B27128
+B27512	EQU	0FF00H		;FFFF+1
+B8048	EQU	1024
+B8755	EQU	2048
+;
+;---	Constant for TX - RX
+;
+NATTEMP	EQU	4		;Number attempts for RX command
+RBLOCK	EQU	9
+PRGEND	EQU	1
+PASSWORD EQU	'L'		;Password
+ACK	EQU	006		;ACK
+NAK	EQU	021		;NAK
+TXPERR	EQU	060H		;Error in PRG
+NP	EQU	055H		;Not my password
+NC	EQU	056H		;Not command
+NOCSUM	EQU	057H		;CSUM not correct
+;
+;----------------------------------------------
+;--- PORT 1 8048
+;
+TXBIT	EQU	00000001B	;Tx byte
+K1	EQU	00100000B	;Key K1
+K2	EQU	01000000B	;Key K2
+K3	EQU	10000000B	;Key K3
+OSCEN	EQU	00000010B	;Enable Oscilator Output
+V5ORIG	EQU	00000100B	;5v for Original Chip (on socket)
+OEORIG	EQU	00001000B	;Output enable for original chip
+CSPRG	EQU	11101111B	;CS PRG Chip
+;
+;--- PORT 2 8048
+;
+CS0	EQU	11101111B	;8243 DD13
+CS1	EQU	11011111B	;8243 DD14
+CS2	EQU	10111111B	;8243 DD15
+CSORIG	EQU	01111111B	;CS Original Chip
+;
+;
+;--- PORT 4 8243 /0/ 
+;
+ROMD0	EQU	00000001B
+ROMD1	EQU	00000010B
+ROMD2	EQU	00000100B
+ROMD3	EQU	00001000B
+;
+;--- PORT 5 8243 /0/
+;
+ROMD4	EQU	00000001B
+ROMD5	EQU	00000010B
+ROMD6	EQU	00000100B
+ROMD7	EQU	00001000B
+;
+;--- PORT 5 8243 /1/ DD14
+;
+ROMA8	EQU	00000001B
+ROMA9	EQU	00000010B
+ROMA10	EQU	00000100B
+ROMA11	EQU	00001000B
+;
+;--- PORT 6 8243 /0/ DD13
+;
+ROMA0	EQU	00000001B
+ROMA1	EQU	00000010B
+ROMA2	EQU	00000100B
+ROMA3	EQU	00001000B
+;
+;--- PORT 4 8243 /1/ DD14
+;
+ROMA4	EQU	00000001B
+ROMA5	EQU	00000010B
+ROMA6	EQU	00000100B
+ROMA7	EQU	00001000B
+;
+;--- PORT 6 8243 /1/ DD14
+;
+ROMA12	EQU	00000001B
+ROMA13	EQU	00000010B
+ROMA14	EQU	00000100B
+ROMA15	EQU	00001000B
+;
+;--- PORT 7 8243 /1/ DD14
+;
+C2716L	EQU	00001110B	;2716
+C2732L	EQU	00001100B	;2732
+C2764L	EQU	00001101B	;2764
+C27128L	EQU	00001001B	;27128
+C27256L	EQU	00001011B	;27256
+C27512L	EQU	00001000B	;27512
+C8048L	EQU	00000110B	;8048
+C8051L	EQU	00000101B	;8051
+C8755L	EQU	00000011B	;8755
+C27I16L	EQU	00001110B	;2716 Intelligent algoritm
+C27C64L	EQU	00011101B	;27C64
+C27C128 EQU	00011001B	;27C128
+C27C256 EQU	00011011B	;27C256
+C27C512 EQU	00011000B	;27C512
+CMOS	EQU	00010000B
+;
+;--- PORT 7 8243 /0/ DD13
+;
+IBML	EQU	00001110B	;IBM enable
+V12L	EQU	00001101B	;12V lamp
+V13L	EQU	00011011B	;13V
+V21L	EQU	10011001B	;21V
+V23L	EQU	10110111B	;23V
+V25L	EQU	11010011B	;25V
+VTESTL	EQU	00000001B	;TEST REGIME
+;
+;--- PORT 4 8243 /2/ DD15
+;
+V12	EQU	00000000B	;12.5V VPP	;0 - 12.5
+V13	EQU	00000001B	;13.0V VPP	;1 - 13.0
+V21	EQU	00001001B	;21.0V VPP	;2 - 16.5
+V23	EQU	00001011B	;23.0V VPP	;3 - 20.5
+V25	EQU	00001101B	;25.0V VPP
+;
+;--- PORT 5 8243 /2/ DD15
+;
+VPPEN	EQU	00000001B	;VPP enable
+VCC5V	EQU	00000000B	;5V   VCC
+VCC6V	EQU	00000100B	;6V   VCC
+VCC65V	EQU	00000110B	;6.5V VCC
+VCCEN	EQU	00001000B	;VCC enable
+;
+;--- PORT 6 8243 /2/ DD15
+;
+A11VPP	EQU	00000001B	;VPP on pin A11 enable
+A15VPP	EQU	00000010B	;Logical A11
+OEVPP	EQU	00000100B	;VPP on pin OE  ENABLE
+OEEN	EQU	00001000B	;Logical OE
+;
+;--- PORT 7 8243 /2/ DD15
+;
+READYL	EQU	00001110B	;READY lamp
+PRGL	EQU	00001101B	;PRG
+ERRORL	EQU	00000011B	;ERROR
+ADDREN	EQU	00001000B	;Set ADDR enable
+;
+IIDENT	EQU	00000001B
+EA8755	EQU	00000010B
+A4VPP	EQU	00000100B
+RDEN	EQU	00001000B
+OSCA1	EQU	00010000B
+;
+;----------------------------
+;--- SYSTEM MEMORY
+;----------------------------
+;
+	ORG	020H
+;
+DATA:	DS	9		;For data buffer
+DATAEE:	
+ROMS:	DS	1		;For set ROM power
+CTEST:	DS	1		;TEST CELL
+ADDRSC:	DS	2		;Start address copy
+ADDRS:	DS	2		;Low  START address programm byte
+NUMBER:	DS	2		;Low  NUMBER programming bytes
+ADDR:	DS	2		;Low  address programm byte
+DELC:	DS	1		;Cell for delay operations
+DELC1:	DS	1		;Cell for delay operations (1)
+BYTEP:	DS	1		;Programming byte
+BYTEO:	DS	1		;Original byte
+JMPTIM:	DS	1		;JMP address for TIMER interrupt
+GRP0:	DS	1		;0's Group regime
+GRP1:	DS	1		;1's Group regime
+IPULSE:	DS	2		;Initial pulse 
+NPULSE:	DS	1		;Number of pulses
+OPULSE:	DS	2		;Overprogramm pulse
+ALGOR:	DS	1		;LOW: (0,1 BITS - Algorithm)
+				:     (2,3 BITS - Speed)
+				;HIGH: VCC
+
+;
+;----------------------------
+;--- COMMON CELL
+;----------------------------
+;
+;--- for IBM PRG mode:
+;
+IBMBYTE	EQU	ADDRSC		;4's bytes for PRG buffer
+;		ADDRS
+IBMNUM	EQU	NUMBER		;Number PRG bytes (byte)
+IBMSADDR EQU	ADDR		;START Address
+IBMERR	EQU	CTEST		;ERRORS
+;
+;----------------------------	
+;--- Start main program
+;----------------------------
+;
+	ORG	0		;MAIN PROGRAMM
+	JMP	START
+;
+;----------------------------
+;--- Start External Interrupt
+;----------------------------
+;
+	ORG	03H		;INTERRUPT SUBROUTINE
+	SEL	RB1
+	MOV	TMPRA,A	
+	JMP	INTER
+;
+;----------------------------
+;--- Start Timer Interrupt
+;----------------------------
+;
+	ORG	07H		;TIMER SUBROUTINE
+;
+	SEL	RB0
+	MOV	TMPRA,A		;Store A
+	SEL	RB1
+;
+	MOV	A,MS		;TIME Constant
+	MOV	T,A		;Reload timer
+;
+	MOV	R1,#JMPTIM
+	MOV	A,@R1
+	JMPP	@A
+;
+;----------------------------
+;--- Timer interrupt start 
+;--- address TABLE
+;----------------------------
+;
+TRANSM:	DB	LOW STRANSM		;TX byte
+TREND:	DB	LOW STREND		;End tx byte
+REGIME:	DB	LOW SREGIME		;Subroutine REGIME
+RECEIV:	DB	LOW SRECEIV		;RX byte
+RECSTOP:DB	LOW SRECSTOP		;RX Stop bit
+FAILED:	DB	LOW SFAILED
+OK:	DB	LOW SOK
+;
+;--- End TABLE
+;
+;----------------------------
+;---Receive byte subroutine
+;----------------------------
+SRECEIV:
+	MOV	A,@RXBA
+	ANL	A,#11111110B	;RX 0
+	JNI	SRE1
+	ORL	A,#01		;RX 1
+SRE1:	RR	A
+	MOV	@RXBA,A
+	INC	RXBIC
+	MOV	A,#-8		;Number rx bites = 8
+	ADD	A,RXBIC
+	JNZ	REGRET		;BLOCK Bits RX?
+;
+	MOV	R1,#JMPTIM
+	MOV	@R1,#(LOW RECSTOP);Address RX STOP bit subroutine
+	JMP	REGRET
+;
+SRECSTOP:
+	STOP	TCNT
+	DIS	TCNTI
+;
+	INC	RXBA		;Receive byte address
+	MOV	A,RXBA
+	ADD	A,#-(DATAEE+1)
+	JNZ	NEXTEB
+	MOV	RXBA,#DATA	;Address for receive data buffer
+	JMP	NEXTE1
+NEXTEB:	
+	INC	RXBYC		;Number received bytes
+NEXTE1:
+	EN	I
+	JMP	REGRET
+;
+;---Transmitt byte subroutine
+;
+STRANSM:
+	DEC	TXBC
+	MOV	A,TXBC
+	JZ	TXRET
+	MOV	A,TXB
+	JB0	TXORL1
+	ANL	P1,#(NOT TXBIT)
+TXROT:	RR	A
+	MOV	TXB,A
+	JMP	REGRET
+TXORL1:
+	ORL	P1,#TXBIT
+	JMP	TXROT
+TXRET:
+	ORL	P1,#TXBIT
+	MOV	R1,#JMPTIM
+	MOV	@R1,#(LOW TREND)
+	JMP	REGRET
+;
+;
+STREND:	
+	STOP	TCNT
+	DIS	TCNTI
+	MOV	TXBC,#0FFH		;End transmitt byte
+	JMP	REGRET
+;	
+;
+SREGIME:
+	SEL	RB0
+	CALL	RDYOFF
+	DEC	TIME		;300mS out?
+	MOV	A,TIME	
+	JNZ	REGRET
+	MOV	TIME,#TREGIME	;300mS delay between 
+				;swith lamps
+	CALL	RGM1		;YES
+REGRET:	
+;
+	SEL	RB0
+	MOV	A,TMPRA
+	RETR
+;
+;--- Device FAILED swith lamps
+;
+SFAILED:
+	SEL	RB0
+	MOV	GRP,#ERRORL
+FO:	DEC	TIME		;300mS out?
+	MOV	A,TIME	
+	JNZ	REGRET
+	MOV	TIME,#TFAILED	;150mS delay between 
+				;swith lamps
+	MOV	A,INGRP
+	JZ	FAL1
+	DEC	INGRP
+	MOV	A,GRP
+FALL:	CALL	OUT2P7
+	JMP	REGRET
+;
+FAL1:
+	INC	INGRP
+	MOV	A,#0FFH
+	JMP	FALL
+;
+;--- Verify OK (Swith lamps)
+;
+SOK:
+	MOV	GRP,#PRGL
+	JMP	FO
+;
+;---INTERUPT SUBROUTINE (Receive byte)
+;
+INTER:
+	DIS	I		;Work in first registry bank
+	ORL	P1,#TXBIT	;Interrupt possible transmiter
+;
+	MOV	R1,#ALGOR
+	MOV	A,@R1
+	RR	A
+	RR	A
+	ANL	A,#03		;2 BITS BAUD RATE
+
+	MOV	R1,#T15R38
+	MOV	MS,#TR38
+	JZ	RXINIT
+
+	DEC	A
+	MOV	R1,#T15R19
+	MOV	MS,#TR19
+	JZ	RXINIT
+
+	DEC	A
+	MOV	R1,#T15R96
+	MOV	MS,#TR96
+	JZ	RXINIT
+
+	MOV	R1,#T15R12
+	MOV	MS,#TR12
+;	
+RXINIT:	MOV	A,R1
+;	MOV	A,#RDBIT15	;1.1/2 time bit length 
+	MOV	T,A		;Load counter
+	STRT	CNT		;START counter
+	EN	TCNTI		;Enable RX bytes
+;
+	MOV	R1,#JMPTIM		;Address RX byte subroutine
+	MOV	@R1,#(LOW RECEIV)	;Set address
+
+;	MOV	MS,#RDBIT	;For load counter after timer INTERRUPT
+;
+	MOV	RXBIC,#0	;Number RX bytes
+	MOV	A,TMPRA
+	RETR
+;
+;---
+;Subroutine for Receive ONE byte
+;---
+RXONEB:
+	SEL	RB1
+	EN	I
+	MOV	DELRX,#200	;50mS	
+ONEE1:	MOV	DELAYR,#80	;1mS DELAY
+ONEEND:
+	MOV	A,RXBYC
+	JNZ	RXONEE
+;
+	DJNZ	DELAYR,ONEEND
+	DJNZ	DELRX,ONEE1
+	DIS	I
+	RETR
+;
+
+RXONEE:	MOV	RXBYC,#0
+	MOV	RXBA,#DATA
+	MOV	A,@RXBA
+	RETR
+;---
+;Subroutine for Transmitt byte in 'A' on line
+;---
+;
+TXBYTE:	
+;	SEL	RB0
+;	MOV	TMPTX,A
+;
+;	SEL	RB1
+;NOTX:	MOV	A,TXBC		;TX Bits counter
+;	INC	A		;ALL bits TX?
+;	JNZ	NOTX		;Wait the end
+;
+;	SEL	RB0
+;	MOV	A,TMPTX
+	SEL	RB1
+;
+	DIS	I
+	MOV	TXB,A		;Save TX byte
+	MOV	TXBC,#8+1	;Number TX bits
+;
+TXLINE:				;Transmitt byte at line
+	
+	MOV	R1,#JMPTIM
+	MOV	@R1,#(LOW TRANSM)	;Address TX byte subroutine
+;
+	MOV	R1,#ALGOR	;2,3 BITS - SPEED
+	MOV	A,@R1
+	RR	A
+	RR	A
+	ANL	A,#03
+;
+	MOV	R1,#TD38
+	JZ	TXINIT
+	DEC	A
+	MOV	R1,#TD19
+	JZ	TXINIT
+	DEC	A
+	MOV	R1,#TD96
+	JZ	TXINIT
+	MOV	R1,#TD12
+;
+TXINIT:	MOV	A,R1
+;	MOV	A,#TDBIT	;Delay bettwin TX bits
+	MOV	T,A		;Load counter
+	MOV	MS,A		;For load counter after INTERRUPT
+	ANL	P1,#NOT TXBIT	;Send START BIT
+	STRT	CNT		;START counter
+	EN	TCNTI		;Enable TX bytes
+;
+NOTX:	MOV	A,TXBC		;TX Bits counter
+	INC	A		;ALL bits TX?
+	JNZ	NOTX		;Wait the end
+	EN	I
+;
+	RETR			;Byte was sent
+;
+;----------------------------
+;--- Out expander port
+;    subroutines
+;----------------------------
+;
+OUT0P7:				;Out byte on 7's port 8243 /0/
+	ANL	P2,#CS0
+	MOVD	P7,A
+OUT0E:	ORL	P2,#NOT CS0
+	RET
+;
+OUT0P6:	ANL	P2,#CS0
+	MOVD	P6,A
+	JMP	OUT0E
+;
+OUT0P5:	ANL	P2,#CS0
+	MOVD	P5,A
+	JMP	OUT0E
+;
+OUT0P4:	ANL	P2,#CS0
+	MOVD	P4,A
+	JMP	OUT0E
+;
+OUT1P7:	ANL	P2,#CS1
+	MOVD	P7,A
+OUT1E:	ORL	P2,#NOT CS1
+	RET
+;
+OUT1P6:	ANL	P2,#CS1
+	MOVD	P6,A
+	JMP	OUT1E
+;
+OUT1P5:	ANL	P2,#CS1
+	MOVD	P5,A
+	JMP	OUT1E
+;
+OUT1P4:	ANL	P2,#CS1
+	MOVD	P4,A
+	JMP	OUT1E
+;
+OUT2P7:	ANL	P2,#CS2
+	MOVD	P7,A
+OUT2E:	ORL	P2,#NOT CS2
+	RET
+;
+OUT2P6:	ANL	P2,#CS2
+	MOVD	P6,A
+	JMP	OUT2E
+;
+OUT2P5:	ANL	P2,#CS2
+	MOVD	P5,A
+	JMP	OUT2E
+;
+OUT2P4:	ANL	P2,#CS2
+	MOVD	P4,A
+	JMP	OUT2E
+;
+;--- OFF READY Lamp
+;
+RDYOFF:
+	ANL	P2,#CS2
+	MOV	A,#1		;ready lamp OFF
+	ORLD	P7,A
+	ORL	P2,#NOT CS2
+	RET
+;
+;--- ON READY Lamp
+;
+RDYON:
+	MOV	A,#READYL
+	JMP	OUT2P7
+;
+;--- Set TIMER interrupt START address
+;
+SETTJMP:
+	MOV	R0,#JMPTIM
+	MOV	@R0,A		    	;Set TIMER interrupt START address
+	RET
+;
+;--- Programming MODE
+;
+JMPPRG:
+	CALL	ONLAMP
+	SEL	MB1
+	CALL	CHIP
+	SEL	MB0
+	CALL	PRGROM
+	SEL	MB1
+	CALL	RESETM
+	SEL	MB0
+	RET
+;
+;----------------------------
+;--- START  PROGRAMMING Address & 
+;    NUMBER PROGRAMMING Bytes
+;    on WORK registry
+;----------------------------
+;
+LOADWR:
+	MOV	R0,#ADDR	;LOW START PRG ADDRESS
+	MOV	R1,#ADDRS	;LOW ADDR for PRG byte
+	CALL	SETP
+	MOV	R0,#ADDRSC
+	MOV	R1,#NUMBER
+	CALL	SETP
+	SEL	MB1
+	CALL	LOADAL
+	SEL	MB0
+	RET
+;
+	
+;
+;--- Set Received parameters
+;
+SETP:
+	MOV	A,@R0
+	MOV	@R1,A
+	INC	R0
+	INC	R1
+SETP1:	MOV	A,@R0
+	MOV	@R1,A
+	RET
+;
+;---Delay 50mS
+;
+DELAY5:	
+	MOV	DELAYR,#025
+D52:	MOV	A,#0FFH
+D51:
+	DEC	A
+	JNZ	D51
+	DEC	DELAYR
+	MOV	A,DELAYR
+	JNZ	D52
+	RET
+;
+DELAY1:
+	MOV	A,#13		;((100-35)/7.5) 35mkS - TIME for run
+				;commands it's subroutine
+DDD1:
+	DEC	A		;DELAY 100 MKS
+	JNZ	DDD1
+;
+	MOV	R0,#DELC	;Address for number 0.1Ms delays (X)
+	MOV	A,@R0		;A=number 1Ms delays (X)
+	DEC	A		;DEC X
+	MOV	@R0,A		;Store X
+	JNZ	DELAY1		;X=0?
+	MOV	R0,#DELC1
+	MOV	A,@R0
+	JZ	DDD2
+	DEC	A
+	MOV	@R0,A
+	JMP	DELAY1
+;
+DDD2:	RET
+;
+;
+;--- Read key(s)
+;
+CI:	MOV	A,TMPKEY
+	ANL	A,#NOT(K1+K2+K3)
+	MOV	TMPKEY,A
+	CALL	CIR
+	JNZ	KBD1		;KEY(S) IS PRESSED
+	CLR	C
+	RET
+;
+KBD1:	CALL	DELAY5		;delay 50 mS
+	CALL	CIR
+	JNZ	KBD1	      	;NO
+	MOV	A,TMPKEY
+	CLR	C
+	CPL	C
+	RET
+;
+;--- Read key(s)
+;
+CIR:
+	ORL	P1,#(K1+K2+K3)	;Out "1" to keys OR (Status port 1 8048)
+	IN	A,P1		;Read down keys
+	CPL	A
+;
+	ANL	A,#(K1+K2+K3) 
+	MOV	DELAYR,A 	;TMP save down's keys
+	ORL	A,TMPKEY	;save down keys
+	MOV	TMPKEY,A
+	MOV	A,DELAYR
+	RET
+;
+DEBUG0:
+;!!!_start
+	STOP	TCNT
+	DIS	TCNTI
+;
+TES0:	MOV	A,#0
+	CALL	OUT1P7
+	CALL	DD0
+	CALL	DD0
+	CALL	DD0
+	MOV	A,#0FFH
+	CALL	OUT1P7
+	CALL	DD0
+	CALL	DD0
+	CALL	DD0
+	CALL	DD0
+	CALL	DD0
+	CALL	DD0
+;	RET
+	JMP	TES0
+;
+;
+;---Delay 100mS	  (only for debug program)
+;!!! for debug
+DD0:	
+	MOV	TMPR,#84
+DDM01:	MOV	DELAYR,#236
+DDM02:	DJNZ	DELAYR,DDM02
+	DJNZ	TMPR,DDM01
+	MOV	TMPR,#3
+DDM03:	DJNZ	TMPR,DDM03
+	RET
+;
+;******************************************************
+;
+;---START MAIN PROGRAMM HERE
+;
+;******************************************************
+;
+	ORG	0200H
+;
+START:
+	DIS	I
+	DIS	TCNTI
+	SEL	RB0
+;
+	MOV	A,#RDEN		;set D7 to 3's state
+	MOVX	@R0,A
+;
+	MOV	R0,#ALGOR
+	MOV	@R0,#00001000B	;SET 9600 BAUD RATE
+;
+	SEL	MB1
+	CALL	RESET		;ALL Reset 
+	CALL	RESETS		;SET Start regime
+;
+STARTS:	
+	SEL	MB1
+	CALL	RESETM
+	SEL	MB0
+KKK:
+	CALL	KBD		;Read download keys
+;
+NEW:	SEL	RB1
+	MOV	A,RXBYC
+	JZ	KKKRET
+KKK10:
+	CALL	RXDEL
+	JNC	KKK15
+	JMP	ENDIS		;TX NAK. 
+;
+KKK15:	SEL	RB0
+	MOV	R1,#DATA
+	MOV	A,@R1
+	ADD	A,#(NOT PASSWORD)+1
+	JZ	KKK2
+	CALL	SETRXB
+KKKRET:	SEL	RB0
+	JMP	KKK
+;
+KKK2:
+;
+;--- If chek sum OK - RUN command
+;
+	CALL	SETRXB
+;
+	INC	R1
+	MOV	A,@R1
+	JZ	ENDIC		;0 - NOT COMMAND
+;
+	MOV	A,#(LOW TCOME - LOW TCOM)
+	CPL	A
+	ADD	A,@R1
+	JC	ENDIC		;If carry - NOT enabled command
+;
+	MOV	A,#ACK
+	CALL	TXBYTE		;TX ACK Command
+	MOV	R1,#DATA+1
+	MOV	A,@R1		;Number command
+	ADD	A,#(LOW TCOM)-1
+	JMPP	@A
+;
+ENDIC:
+	MOV	A,#NC
+	JMP	ENDTXI
+;
+ENDIP:
+	MOV	A,#NP		;Failed password
+	JMP	ENDTXI		;TX NOT Password & END interrupt
+ENDIS:
+	SEL	RB0
+	DEC	RXCOM
+	MOV	A,RXCOM
+	JNZ	END1
+;
+	DIS	I
+	STOP	TCNT
+	SEL	MB1
+	CALL	RESETS
+	CALL	RESETM
+	SEL	MB0
+END1:	
+	MOV	A,#NAK		;FaIled control sum
+ENDTXI:	CALL	TXBYTE		;Transmitt byte
+	CALL	SETRXB
+	JMP	STARTS
+;
+;--- Table comands from IBM/PC
+;
+TCOM:
+	DB	(LOW START)	;/1/  JMP START		 		
+	DB	(LOW RPROM)     ;/2/  Read programming CHIP
+	DB	(LOW ROROM)	;/3/  Read original CHIP
+	DB	(LOW SETCHIP)	;/4/  Set Programming CHIP
+	DB	(LOW SETPOW)	;/5/  Set Programming POWER
+	DB	(LOW PRGST)	;/6/  Programming START
+	DB	(LOW PRGTEST)	;/7/  Start program at MB1
+	DB	(LOW PRGV0)	;/8/  Verify this checksum
+	DB	(LOW PRGV0)	;/9/  Verify this checksum
+	DB	(LOW PRGBC)	;/10/ Blank check device
+	DB	(LOW IDENT)	;/11/ Read Intelligent identificator
+	DB	(LOW SETBAUD)	;/12/ SET BAUD RATE
+TCOME:
+
+;
+;---	JMP'S to subroutine
+;
+RPROM:	JMP	SRPROM
+ROROM:	JMP	SROROM
+SETCHIP:JMP	SETIC
+SETPOW:	JMP	SETIP
+PRGST:	JMP	SPRGST
+PRGTEST:JMP	SPRGTEST
+PRGV0:	JMP	PRGVSUM
+PRGBC:	JMP	PRGBLANK
+IDENT:	JMP	RIDENT
+SETBAUD:JMP	SBAUD
+;
+;
+;---
+;
+KBD:
+	CALL	CI		;Read keyboard
+;
+	JB5	JMPSG		;Select group regimes
+	JB6	JMPSR		;Select regime inside group
+	JB7	PRG		;Programming mode
+	RETR
+;
+PRG:	
+	JMP	JMPPRG
+;
+;--- Select regime inside group
+;
+JMPSG:
+	JB6	FIXIN		;Fixin regimes
+	JB7	JMPSGR		;Verify mode
+;
+	MOV	A,GRP
+	JZ	JMPSG1
+	MOV	GRP,#0
+	JMP	JMPSG0
+JMPSG1:	MOV	GRP,#1
+JMPSG0:	
+	STRT	T
+	EN	TCNTI
+	CLR	F1
+	CPL	F1		;Set Timer interrupt flag
+JMPSGR:
+	RETR
+;
+;--- Select group regime
+;
+JMPSR:
+	JB7	JMPVER		;JMP Verify mode
+;
+	JF1	JMPSR1		;If timer working - set regime
+       	RETR			;Timer OFF - NOT set regime
+JMPVER:
+	JMP	START		;JMP for start programm (DEBUG)
+;
+JMPSR1:	MOV	A,GRP
+	JNZ	SR1
+;
+;--- 0 regimes group:
+;			0 - 12V
+;			1 - 13V
+;			2 - 21V
+;			3 - 23V
+;			4 - 25V
+;			5 - 0000 - end group
+;
+	MOV	R0,#GRP0
+	INC	@R0
+	MOV	A,@R0
+	MOVP3	A,@A
+	JNZ	REG01
+	MOV	@R0,#(LOW TGRP0)
+REG01:	
+	RETR
+;
+;--- 1 regimes group:
+;			0 - C2716	
+;			1 - C2732	
+;			2 - C2764	
+;			3 - C27128
+;			4 - C27256
+;			5 - C27512
+;			6 - C8048	
+;			7 - C8051	
+;			8 - C8755
+;			9  - C27C64
+;			10 - C27C128
+;			11 - C27C256
+;			12 - C27C512
+;			13 - C27I16
+;			14 - 0000 - end group
+;
+SR1:
+;
+	MOV	R0,#GRP0
+	MOV	A,@R0
+	MOVP3	A,@A
+	ANL	A,#(NOT VTESTL)
+	JNZ	SR1W
+	MOV	R0,#CTEST
+	INC	@R0
+	MOV	A,@R0
+	MOVP3	A,@A
+	JNZ	TESTWW
+	MOV	@R0,#(LOW TESTG)
+TESTWW:
+	JMP	TEST
+;
+;--- TEST REGIME
+;
+
+;
+SR1W:	MOV	R0,#GRP1
+	INC	@R0
+	MOV	A,@R0
+	MOVP3	A,@A
+	JNZ	REG11
+	MOV	@R0,#(LOW TGRP1)
+REG11:	
+	RETR
+;
+;--- Fixin regime mode
+;
+FIXIN:
+	JB7	START		;ON ALL 3 KEY -> JMP START
+;
+FIXINS:	STOP	TCNT
+	DIS	TCNTI
+	CALL	SG0ON		;Lamps "0" group's -> ON
+	CALL	SG1ON		;Lamps "1" group's -> ON
+	CALL	RDYON		;Lamp READY -> ON
+	CLR	F1		;Timer interrupt flag
+	RETR
+	
+;!!!_start
+TESTONE:
+	MOV	R0,#ROMS
+;
+TEST112:STOP	TCNT
+	DIS	TCNTI
+	DIS	I
+;
+TESTX13:
+	MOV	@R0,A
+	SWAP	A
+	CPL	A
+	CALL	OUT1P7
+TTTT:	CALL	CI
+	JNC	TTTT
+	MOV	A,@R0
+	CPL	A
+	CALL	OUT1P7
+TTTT1:	CALL	CI
+	JNC	TTTT1
+	RET
+;
+;	INC	R0
+;	JMP	TESTX13
+;
+;	MOV	R0,#DATA
+;	INC	R0
+;	MOV	A,@R1
+;	SWAP	A
+;	CPL	A
+;	CALL	OUT1P7
+;TTTT2:	CALL	CI
+;	JNC	TTTT2
+;;	MOV	R0,#DATA
+;	MOV	A,@R1
+;	CPL	A
+;	CALL	OUT1P7
+;TTTT3:	CALL	CI
+;	JNC	TTTT3
+;
+;	RET
+;
+;---
+;
+SETRXB:	SEL	RB1
+	MOV	RXBYC,#0	;Number received bytes = 0
+	MOV	RXBA,#DATA	;Address for receive data buffer
+;
+	RETR
+;
+;------------------------------------------------------------------
+;
+;--- Tables
+;
+	ORG	0300H
+;
+;--- 0 Group regisry
+; 
+TGRP0:
+TV12L:	DB	V12L	;00
+TV13L:	DB	V13L	;01
+TV21L:	DB	V21L	;02
+TV23L:	DB	V23L	;03
+TV25L:	DB	V25L	;04
+TTESTL:	DB	VTESTL	;
+	DB	0000	;
+;
+;--- 1 Group registry
+;
+TGRP1:
+TC2716L:  DB	C2716L	;00
+TC2732L:  DB	C2732L	;01
+TC2764L:  DB	C2764L	;02
+TC27128L: DB	C27128L	;03
+TC27256L: DB	C27256L	;04
+TC27512L: DB	C27512L ;05
+TC8048L:  DB	C8048L	;06
+TC8051L:  DB	C8051L	;07
+TC8755L:  DB	C8755L	;08
+TC27C64L: DB	C27C64L	;09
+	  DB	C27C128	;10
+	  DB	C27C256	;11
+	  DB	C27C512	;12
+	  DB	C27I16L	;13
+;
+	  DB	0000	;
+GRPVCC:
+	DB	VCC5V
+	DB	VCC6V
+	DB	VCC65V
+
+
+;
+;--- TEST GROUP
+;
+TESTG:
+	DB	(NOT 0E1H)	
+	DB	(NOT 0E2H)
+	DB	(NOT 0E3H)
+	DB	(NOT 0E4H)
+	DB	(NOT 0E5H)
+	DB	(NOT 0E6H)
+	DB	(NOT 0E7H)
+	DB	(NOT 0E8H)
+	DB	(NOT 0E9H)
+	DB	(NOT 0EAH)
+	DB	(NOT 0EBH)
+	DB	(NOT 0ECH)
+	DB	(NOT 0EDH)
+	DB	(NOT 0EEH)
+TESTGE:	DB	(NOT 0EFH)
+	DB	0000
+;
+;---
+;
+;
+;---
+;
+RGM1:
+	MOV	A,GRP
+	JNZ	SG1		;Select 0 group
+;
+;--- 0's group regime:	12V
+;			21V
+;			25V
+;	
+	CALL	SG1ON		;ON Lamp Group "1"
+	MOV	A,INGRP		;inside group
+	JNZ	SG0OFF		;ON or OFF lamps
+				;if flag = 1 -> OFF lamps
+	INC	INGRP		;flag = 0
+SG0ON:	MOV	R0,#GRP0
+	MOV	A,@R0
+	MOVP3	A,@A
+	JMP	OUT0P7
+
+SG0OFF:
+	DEC	INGRP
+	MOV	A,#0FH	
+	JMP	OUT0P7
+;
+;--- 1's group regime:	2716
+;			2764
+;			27128
+;			27256
+SG1:
+	CALL	SG0ON		;ON Lamp Group "0"
+	MOV	A,INGRP		;inside group
+	JNZ	SG1OFF		;ON or OFF lamps
+				;if flag = 1 -> OFF lamps
+	INC	INGRP		;flag = 0
+SG1ON:
+	MOV	R0,#GRP0	;If test regime
+	MOV	A,@R0
+	MOVP3	A,@A
+	ANL	A,#(NOT VTESTL)
+	MOV	R0,#CTEST
+	JZ	SG1NNN		;jmp to test regime
+SG1NON:	MOV	R0,#GRP1
+SG1NNN:
+	MOV	A,@R0
+	MOVP3	A,@A
+
+	ANL	A,#CMOS
+	JZ	NOCMOS
+
+	ANL	P2,#CS0
+	MOV	A,#NOT 1
+	ANLD	P7,A
+	ORL	P2,#NOT CS0
+NOCMOS:
+	MOV	A,@R0
+	MOVP3	A,@A
+	JMP	OUT1P7
+;
+SG1OFF:
+	DEC	INGRP		;flag = 1
+	MOV	A,#0FH
+	CALL	OUT1P7
+;
+	ANL	P2,#CS0
+	MOV	A,#1
+	ORLD	P7,A
+	ORL	P2,#NOT CS0
+;
+	RET
+;
+;---
+;
+;
+;----------------------------
+;--- Read programming CHIP 
+;----------------------------
+;
+SRPROM:
+	CLR	F1
+	CPL	F1
+;
+	MOV	TMPR,#RDR48	;FLAG ONLY FOR 8748
+	SEL	MB1
+	CALL	ONVCC
+	SEL	MB0
+	JMP	RD
+;
+;----------------------------
+;--- Receive with OR delay 20MS
+;----------------------------
+;
+RXDEL:
+	EN	I
+	SEL	RB0
+	MOV	R1,#DELC
+	MOV	@R1,#0100
+;	
+RXD10:	MOV	A,#128		;((1000-35)/7.5) 35mkS - TIME for run
+				;commands it's subroutine
+	CALL	DELAY		;Delay 1mS-35mkS
+	SEL	RB1
+	MOV	A,RXBYC
+	SEL	RB0
+	ADD	A,#-RBLOCK
+	JZ	RXDELE
+; 
+	MOV	R0,#DELC	;Address for number 1Ms delays (X)
+	MOV	A,@R0		;A=number 1Ms delays (X)
+	DEC	A		;DEC X
+	MOV	@R0,A		;Store X
+	JNZ	RXD10		;X=0?
+
+;	DIS	I
+;	MOV	R0,#RNAK
+;	MOV	@R0,#3
+;
+RXDNO:
+	CLR	C
+	CPL	C
+	SEL	RB0
+	RET
+RXDELE:
+	SEL	RB1
+	MOV	A,#0
+VERC1:	DEC	RXBA
+	ADD	A,@RXBA
+	DJNZ	RXBYC,VERC1
+	SEL	RB0
+	JNZ	RXDNO
+;
+	CLR	C
+	SEL	RB0
+	RET
+;
+;--- Write wrong PRG byte & increment ERROR counter
+;
+WRITEWB:
+;
+	MOV	R0,#IBMNUM+1
+	MOV	A,@R0
+	ADD	A,#IBMBYTE
+	MOV	R0,A
+	MOV	R1,#BYTEP
+	MOV	A,@R1
+	MOV	@R0,A
+;
+	MOV	R0,#IBMERR
+	INC	@R0
+	RET
+;
+;--- Write byte on line
+;
+OUTBYTE:
+	MOV	R0,#GRP1
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8755L)
+	JZ	OUT55
+;
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8048L)
+	JZ	OUT48
+;
+OUTALL:	MOV	R0,#BYTEO
+	MOV	A,@R0
+	CALL	OUT0P4
+	SWAP	A
+	JMP	OUT0P5
+;
+OUT48:	MOV	A,#(EA8755 + RDEN + OSCA1)
+	MOVX	@R0,A
+	JMP	OUTALL
+;
+OUT55:
+	CALL	SETA55
+;	ANL	P2,#CS2
+;	MOV	A,#ADDREN
+;	ORLD	P7,A
+;	ORL	P2,#NOT CS2
+;
+	MOV	A,#RDEN		;NEW VERSION
+	MOVX	@R0,A
+;
+	JMP	OUTALL
+;
+;---	Next byte?
+;
+TRYNEXT:
+	MOV	R0,#ADDRS
+	MOV	R1,#ADDR
+	MOV	A,@R0
+	CPL	A
+	INC	A
+	ADD	A,@R1
+	JNZ	NBLB00
+;
+	INC	R0
+	INC	R1
+;
+	MOV	A,@R0
+	CPL	A
+	INC	A
+	ADD	A,@R1
+	JNZ	NBLB00
+	CLR	C
+	CPL	C
+	RET
+;
+NBLB00:
+;!!!
+	SEL	MB1
+	CALL	NEXTBH	
+	SEL	MB0
+	MOV	R0,#ADDR
+	MOV	R1,#ADDRSC
+	CALL	SETP
+;	CALL	NEXTADDR
+	CLR	C
+;***	EN	I
+	RET
+;
+;---
+;
+	ORG	0400H
+;
+;--- Read original byte
+;
+READOB:	
+	MOV	R0,#GRP1
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8048L)
+	JZ	READO48
+;
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8755L)
+	JNZ	READO1
+	SEL	MB1
+	JMP	READP55
+;
+READO1:	ANL	P1,#(NOT OEORIG)	;0R TXBIT !!!
+	ANL	P2,#CSORIG		;!!!???
+	MOV	A,#BYTEO
+	SEL	MB1
+	CALL	INBYTE
+	SEL	MB0
+	ORL	P1,#(OEORIG OR TXBIT)
+	ORL	P2,#(NOT CSORIG)	;!!!???
+	RET
+;
+;--- Read original byte for 8048: 2716 -> 8048
+;
+READO48:
+	CALL	SETA1
+	JMP	READO1
+;
+SETA55:
+;	ANL	P2,#CS2		;old version
+;	MOV	A,#ADDREN	;old version
+;	ORLD	P7,A		;old version
+;	ORL	P2,#NOT CS2	;old version
+;
+	MOV	A,#RDEN
+	MOVX	@R1,A
+;
+;
+	MOV	A,#(ROMA14 OR ROMA15)
+	CALL	OUT1P6		;ALE	-> "1"
+;
+	CALL	SETAD
+	CALL	OUT1P5		;Set A8-A11
+	CALL	DEL5T		;Delay 5tcy
+;
+	MOV	A,#(NOT ROMA14)	;ALE -> "0"
+	CALL	OUT1P6		
+;
+;	ANL	P1,#CSPRG
+	RET
+;
+;---
+;
+;----------------------------
+;--- Test Subroutines (MB1)
+;----------------------------
+;
+SPRGTEST:
+	SEL	MB1
+	CALL	RUNTEST
+	SEL	MB0
+	JMP	NEW
+;
+;---
+;	
+;
+;----------------------------
+;--- Programming ROMS
+;----------------------------
+;
+PRGROM:
+	DIS	I
+	CALL	LOADWR		;Load work registry:
+				;START  PROGRAMMING address &
+				;NUMBER PROGRAMMING bytes
+	MOV	TMPR,#PRG48	;SPECILA FLAG FOR 8748 CPU
+	SEL	MB1
+	CALL	ONVCC
+	CALL	ONVPP		;SET signal for programming
+	SEL	MB0
+;
+	MOV	R0,#DELC
+;
+NEXTPRG:CALL	SETADDR		;Set programming address
+	CALL	READOB		;Read original byte
+	SEL	MB1
+	CALL	VREADPB		;Read byte with programming chip
+				;in verify mode
+	CALL	COMP		;Compare with Original byte
+	SEL	MB0
+	JZ 	NEXTA1
+	CALL	OUTBYTE
+	SEL	MB1
+	CALL	PRGBYTE		;PROGRAMMING BYTE
+	SEL	MB0
+;
+NEXTA1:	
+	SEL	MB1
+	CALL	NEXTADDR
+	SEL	MB0
+	JNC	NEXTPRG
+	JMP	ENDPRG
+;
+;--- All byte programming. Verify all bytes
+;	
+ENDPRG:	
+	CALL	LOADWR		;Load work registry:
+				;START  PROGRAMMING address &
+				;NUMBER PROGRAMMING bytes
+	CALL	ONREAD		;SET PRG CHIP line to READ regime
+NEXTREAD:
+	CALL	SETADDR		;Set VERIFY BYTE address
+	CALL	READOB		;Read original byte
+	SEL	MB1
+	CALL	READPB		;Read byte with programming chip
+				;In READ mode & compare with
+				;Original byte
+	SEL	MB1
+	CALL	COMP
+	SEL	MB0
+	JNZ	PRGERR
+	SEL	MB1
+	CALL	NEXTADDR
+	SEL	MB0
+	JNC	NEXTREAD
+;
+;--- ALL BYTES COMPARE OK
+;--- END OF PROGRAMMING CHIP	
+;
+	MOV	A,#(LOW OK)
+	JMP	SETFL
+PRGERR:	
+;
+	MOV	A,#(LOW FAILED)	;Address timer interrupt subroutine 
+SETFL:	CALL	SETTJMP		;for Swith lamp to "CHIP failed"
+	SEL	MB1
+	CALL	RESET 		;ALL line = 0
+	SEL	MB0
+	MOV	INGRP,#1	;flag = 1  lamps is ON
+	MOV	A,#TFAILED	;150mS delay between 
+				;swith lamps
+	SEL	MB1
+	CALL	SETTIME		;Set time constant
+	SEL	MB0
+	STRT	T
+	EN	TCNTI
+ERR100:
+	CALL	CI
+	JNC	ERR100
+	STOP	TCNT
+	DIS	TCNTI
+	SEL	MB1
+	CALL	RESETE
+	CALL	RESET
+	SEL	MB0
+	EN	I
+	RET
+;
+;--- TEST SUBROUTINE
+;
+TEST:
+	RETR
+;
+;--- READ INTELLIGENT IDENTIFICATOR
+;
+RIDENT:
+	CALL	SETUPD
+	CALL	RESSET
+	MOV	A,#RDEN+IIDENT	;SET +12V TO A9
+	MOVX	@R0,A
+	MOV	A,#ROMA9
+	CALL	OUT1P5
+	ANL	P1,#CSPRG
+	CALL	DELAY5
+;
+	MOV	R0,#DELC
+	CALL	RID1		;READ MANUFACTURED CODE
+;
+	MOV	A,#ROMA0	;SET A0=1
+	CALL	OUT0P6
+;	
+	MOV	R0,#DELC1
+	CALL	RID1		;READ DEVICE CODE
+;
+	MOV	A,#RDEN
+	MOVX	@R0,A
+	CLR	A
+	CALL	OUT1P5
+;
+	CALL	SENDDELC
+	JMP	SROEND	
+;	
+RID1:
+	SEL	MB1
+	CALL	IN11
+	SEL	MB0
+	RET
+;
+;---
+;
+	ORG	0500H
+;
+;--- SET ADDRESS
+;
+SETADDR:
+	MOV	R0,#GRP1
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8048L)
+	JNZ	SETA0
+	JMP	SETA48
+SETA0:
+	MOV	A,@R0
+	ADD	A,#-(LOW TC8755L)
+	JNZ	SETA1
+	JMP	SETA55
+;
+SETA1:	
+	MOV	R0,#ADDR
+	MOV	R1,#ROMS
+;
+	MOV	A,@R0
+	CALL	OUT0P6		;A0-A3
+	SWAP	A
+	CALL	OUT1P4		;A4-A7
+	INC	R0
+;
+	MOV	A,@R1
+	ANL	A,#ROMA12
+	JZ	ADDR21
+	MOV	A,@R0
+	ORL	A,#ROMA11
+	CALL	OUT1P5
+	RET
+;
+ADDR21:
+	MOV	A,@R1
+	ANL	A,#ROMA13
+	JNZ	ADDR10
+;
+	MOV	A,@R0
+	CALL	OUT1P5		;A8-A11
+	SWAP	A
+;
+	XRL	A,#ROMA13	;invert A13
+	ORL	A,@R1
+	JMP	ADDR11
+;
+ADDR10:
+	MOV	A,@R0
+	CALL	OUT1P5		;A8-A11
+	SWAP	A
+	ORL	A,@R1
+	ANL	A,#NOT ROMA13
+ADDR11:
+;
+	ANL	P2,#CS1
+	MOVD	P6,A		;A12
+	ORL	P2,#NOT CS1
+	RET
+;
+;--- ON VCC&VPP for read bytes from PRG chip
+;
+ONREAD:
+	MOV	A,#VCC5V
+	CALL	OUT2P5
+	MOV	A,#(VCC5V OR VCCEN)	;VPP - Desable
+	CALL	OUT2P5
+;
+	ANL	P1,#CSPRG		;CS Original & Programming
+	ANL	P2,#CSORIG		;chips Enable
+	RET
+;
+;---
+;
+;----------------------------
+;--- Read original CHIP 
+;----------------------------
+;
+SROROM:
+;
+	CLR	F1
+;
+	SEL	MB1
+	CALL	ONVCC
+	SEL	MB0
+
+;
+RD:
+	CALL	RDYOFF
+;
+	MOV	R0,#DATA+2	;Start address
+	MOV	R1,#ADDR
+	CALL	SETP
+;
+	MOV	R0,#DATA+2	;Start address
+	MOV	R1,#ADDRSC	;Copy start sddress
+	CALL	SETP
+;
+	MOV	R0,#DATA+4	;End address	
+	MOV	R1,#ADDRS
+	CALL	SETP
+;
+NEXTBL:	CALL	SENDBLK
+;
+	ADD	A,#-ACK
+	JZ	ISNEXTBL
+	JMP	SROEND
+;
+;	ADD	A,#???		;FOR JMP IF NOT RX	
+;
+;!!!_start
+;	STOP	TCNT
+;	DIS	I
+;	DIS	TCNTI
+;	MOV	A,#0
+;	CALL	OUT1P7
+;	CALL	DELAY5
+;	MOV	A,#0FFH
+;	CALL	OUT1P7
+;!!!_end
+;	MOV	R0,#ADDRSC
+;	MOV	R1,#ADDR
+;	CALL	SETP
+;	JMP	NEXTBL
+;!!!	JMP	NEXTBL
+;		
+ISNEXTBL:
+;
+;	DIS	I
+;	STOP	TCNT
+;	DIS	TCNTI
+;
+	MOV	R0,#ADDRS
+	MOV	R1,#ADDR
+	MOV	A,@R0
+	CPL	A
+	INC	A
+	ADD	A,@R1
+	JNZ	NEXTB0
+;
+	INC	R0
+	INC	R1
+;
+	MOV	A,@R0
+	CPL	A
+	INC	A
+	ADD	A,@R1
+	JNZ	NEXTB0
+;***	JMP	SROEND
+;
+SROEND:	
+	DIS	I
+	SEL	MB1
+	CALL	RESET		;All line = 0
+	CALL	RESETE
+	SEL	MB0
+	CALL	SG1ON 		;Set CHIP's lamp right
+	EN	I		;Receive enable
+	JMP	NEW		;KBD Desable, JMP start
+;
+NEXTB0:
+;!!!
+	SEL	MB1
+	CALL	NEXTBH	
+	SEL	MB0
+	MOV	R0,#ADDR
+	MOV	R1,#ADDRSC
+	CALL	SETP
+;	CALL	NEXTADDR
+;***	EN	I
+	JMP	NEXTBL
+;
+;---	Send block to IBM whis check SUM
+;
+SENDBLK:
+	MOV	R0,#DATA+6	;Block length
+	MOV	R1,#NUMBER
+	CALL	SETP
+;
+	MOV	CSUM,#0
+;
+NEXTB:	
+	CALL	SETADDR		;Set address
+	JF1	NPB
+	CALL	READOB		;Read byte
+	MOV	R0,#BYTEO
+	JMP	NALL
+NPB:	
+	SEL	MB1
+	CALL	READPB
+	SEL	MB0
+	MOV	R0,#BYTEP
+NALL:	MOV	A,@R0
+	CALL	TXBYTE
+;
+	MOV	R0,#BYTEP
+	JF1	NPB1
+	MOV	R0,#BYTEO
+NPB1:	MOV	A,@R0
+	ADD	A,CSUM
+	MOV	CSUM,A	
+;
+	SEL	MB1
+	CALL	NEXTADDR
+	SEL	MB0
+	JNC	NEXTB
+;
+	MOV	A,CSUM
+	CPL	A
+	INC	A
+	CALL	TXBYTE
+;
+	JMP	RXONEB
+;***	RET
+;
+;---
+;
+RESSET:
+	MOV	R0,#DATA+6	;Block length
+	MOV	R1,#NUMBER
+	CALL	SETP
+;
+	MOV	CSUM,#0		;Check sum for TX
+	MOV	R0,#DELC 	
+;***	MOV	R0,#DELC1	
+;
+	MOV	@R0,#0		;Low byte Number ERRORS
+	INC	R0
+	MOV	@R0,#0		;High byte Number ERRORS
+	RET
+;
+;---	Send informations in DELC Cells
+;
+SENDDELC:
+	MOV	R0,#DELC
+	MOV	A,@R0
+	ADD	A,CSUM
+	MOV	CSUM,A
+	MOV	A,@R0
+	CALL	TXBYTE
+;
+	MOV	R0,#DELC1
+	MOV	A,@R0
+ 	ADD	A,CSUM
+	MOV	CSUM,A
+	MOV	A,@R0
+	CALL	TXBYTE
+;
+	MOV	A,CSUM
+	CPL	A
+	INC	A
+	JMP	TXBYTE
+;***	RET
+;
+;---
+;
+	ORG	0600H
+;
+;---
+;
+;----------------------------
+;--- START PROGRAMMING (IBM REGIME)
+;----------------------------
+;
+SPRGST:
+	DIS	I
+	CALL	RDYOFF
+;
+	CALL	SETRXB
+	SEL	RB0
+;
+	MOV	TMPR,#PRG48	;SPECILA FLAG FOR 8748 CPU
+	SEL	MB1
+	CALL	ONVCC
+	CALL	ONVPP
+	SEL	MB0
+;
+	MOV	A,#ACK
+	CALL	TXBYTE
+;
+IBMS:
+	CALL	RXDEL
+	JC	IBM11		;rewrite without jnc
+	MOV	RNAK,#0		;reset NAK counter
+	MOV	PC,#0		;NUMBER PRG IMPULSES FOR PRG = 0
+      	JMP	IBM1
+;!!!	JNC	IBM1
+;
+IBM11:
+	MOV	A,RNAK
+	ADD	A,#-3		;if NAK counter = 3 -> RESET PROGRAMMER
+	JNZ	IBM11S
+	JMP	SROEND
+;
+IBM11S:	INC	RNAK
+	MOV	A,#NAK
+	CALL	TXBYTE
+	CALL	TXBYTE
+	CALL	SETRXB
+	JMP	IBMS
+IBM1:	
+	MOV	R0,#DATA+7
+	MOV	A,@R0
+	JNZ	IBMEND
+;
+	MOV	R0,#DATA
+	MOV	R1,#IBMSADDR
+	CALL	SETP		;Set START Address
+;
+	MOV	R0,#DATA+2
+	MOV	R1,#IBMNUM
+	MOV	A,@R0		;Set number PRG bytes
+	MOV	@R1,A
+	INC	R1
+	MOV	@R1,#0
+; 
+	MOV	R0,#DATA+3
+	MOV	R1,#IBMBYTE
+	CALL	SETP
+	INC	R0
+	INC	R1
+	CALL	SETP		;Set PRG bytes
+;
+	MOV	R0,#IBMERR
+	MOV	@R0,#0
+;
+IBM3:
+	CALL	SETADDR		;Set programming address on addr line
+	CALL	READIOB		;Write original byte on BYTEO cell
+	SEL	MB1
+	CALL	VREADPB		;Write programming byte on BYTEP cell
+	CALL	COMP		;Compare ORIGINAL byte & byte with PRG CHIP
+	SEL	MB0
+	JZ	NEXTIBM		;If 0 - not programming; next address
+;
+	CALL	OUTBYTE
+	SEL	MB1
+	CALL	PRGBYTE
+	SEL	MB0
+	JNC	NEXTIBM
+;
+	CALL	WRITEWB
+;
+NEXTIBM:
+	MOV	R1,#IBMNUM
+	MOV	R0,#IBMNUM+1
+	INC	@R0
+	MOV	A,@R0
+	CPL	A
+	INC	A
+	ADD	A,@R1
+	JZ	IBM5
+	SEL	MB1
+	CALL	NEXTBH		;Set next PRG CHIP's address
+	SEL	MB0
+	JMP	IBM3
+;
+IBM5:	MOV	R0,#IBMERR
+	MOV	A,@R0
+	JZ	IBM6
+	CALL	TXERR
+	JMP	IBMS
+;
+IBM6:	CALL	SETRXB
+	MOV	A,#ACK
+	CALL	TXBYTE
+	MOV	A,PC
+	CALL	TXBYTE
+	JMP	IBMS
+;
+IBMEND:
+	MOV	A,#ACK
+IBMTXE:	CALL	TXBYTE
+	JMP	SROEND
+;
+TXERR:
+	MOV	CSUM,#TXPERR
+;
+	MOV	A,CSUM
+	CALL	TXBYTE
+;
+	MOV	R0,#NUMBER
+	MOV	R1,#IBMBYTE
+	MOV	@R0,#4
+;
+TXERR1:	MOV	A,@R1
+	ADD	A,CSUM
+	MOV	CSUM,A
+	MOV	A,@R1
+	INC	R1
+;
+	CALL	TXBYTE
+	MOV	A,@R0
+	DEC	A
+	MOV	@R0,A
+	JNZ	TXERR1
+;
+	MOV	A,CSUM
+	CPL	A
+	INC	A
+	CALL	TXBYTE
+	JMP	SETRXB
+;
+;
+;---Delay 100mS	  (only for debug program)
+;
+DELAYD:	
+	MOV	TMPR,#84
+DM1:	MOV	DELAYR,#236
+DM2:	DJNZ	DELAYR,DM2
+	DJNZ	TMPR,DM1
+	MOV	TMPR,#3
+DM3:	DJNZ	TMPR,DM3
+	RET
+;
+;--- Delay subroutines
+;
+DEL5T:
+	MOV	A,#5
+;
+DELAY:	DEC	A		;Delay 7.5 mkS
+	JNZ	DELAY
+	RET
+;
+;--- SET ADDRESS For 8048
+;
+SETA48:
+;
+;no	MOV	A,#00000000B	;T0 	-> 0V
+;no	CALL	OUT0P6		;RESET	-> 0V
+;
+;
+	MOV	A,#0
+	CALL	OUT2P6		;PROG -> 0
+;
+	ANL	P2,#CS0
+	MOV	A,#NOT ROMA3	;RESET -> 0V   (ENABLE SET ADDRESS)
+	ANLD	P6,A
+	ORL	P2,#NOT CS0
+;
+	MOV	A,#(RDEN + OSCA1 + EA8755) ;enable set A7
+	MOVX	@R1,A
+;
+	CALL	SETAD		;SET ADDRESS
+	ORL	A,#ROMA11
+	CALL	OUT1P5		;Set A8-A11
+	CALL	DEL5T		;Delay 5tcy
+;
+	ANL	P2,#CS0
+	MOV	A,#ROMA3	;RESET -> +5V  (latch addres)
+	ORLD	P6,A
+	ORL	P2,#NOT CS0
+;
+	MOV	A,#(OSCA1 + EA8755) ;enable read data
+	MOVX	@R1,A
+;
+	RET
+;
+SETAD:
+	MOV	R0,#ADDR
+	MOV	A,@R0
+	CALL	OUT0P4		;Set A0-A3
+	SWAP	A
+	CALL	OUT0P5		;Set A4-A7
+	INC	R0
+	MOV	A,@R0		
+	RET
+;
+;--- Read original byte (IBM regime)
+;
+READIOB:
+	MOV	R0,#IBMNUM+1
+	MOV	A,@R0
+	ADD	A,#IBMBYTE
+	MOV	R0,A
+	MOV	R1,#BYTEO
+	MOV	A,@R0
+	MOV	@R1,A
+	RET
+;
+;---	Setup Device & Receive parameters
+;
+SETUPD:
+	SEL	MB1
+	CALL	ONVCC
+	SEL	MB0
+;
+	CALL	RDYOFF
+	CALL	DELAY5
+;
+	MOV	R0,#DATA+2	;Start address
+	MOV	R1,#ADDR
+	CALL	SETP
+;
+	MOV	R0,#DATA+2	;Start address
+	MOV	R1,#ADDRSC	;Copy start sddress
+	CALL	SETP
+;
+	MOV	R0,#DATA+4	;End address	
+	MOV	R1,#ADDRS
+	JMP	SETP
+;***	RET
+;
+;---	Reset information if error
+;
+;
+;---
+;
+	ORG	0716H
+;
+;----------------------------
+;--- Verify byte from IBM (csum)
+;----------------------------
+;
+PRGVSUM:
+;
+	CLR	F1
+	CPL	F1
+;
+	CALL	SETUPD
+NVERBL:	CALL	RESSET
+NVERB:	
+	CALL	SETADDR		;Set address
+	SEL	MB1
+	CALL	READPB
+	SEL	MB0
+	MOV	R1,#BYTEP
+	MOV	A,@R1
+;
+;---	Check sum procedure
+;	
+	MOV	R0,#DELC
+	ADD	A,@R0
+	MOV	@R0,A
+	JNC	SUMEND
+	INC	R0
+	INC	@R0
+SUMEND:
+;
+;---	End check sum procedure
+;
+	SEL	MB1
+	CALL	NEXTADDR
+	SEL	MB0
+	JNC	NVERB
+;
+;---	TX Check SUM
+;
+	CALL	SENDDELC	;Send informations in DELC Cells
+;
+	CALL	RXONEB
+	MOV	TMPRA,A
+	ADD	A,#-ACK
+	JZ	ISNVERBL
+	MOV	A,TMPRA
+	ADD	A,#-NOCSUM	;Not correct CSUM. Block has errors
+	JZ	SENDAB		;Send all BLOCK
+;
+	MOV	R0,#ADDRSC
+	MOV	R1,#ADDR
+	CALL	SETP
+	JMP	NVERBL
+;
+;---	Send all block
+;
+SENDAB:
+	MOV	R0,#DELC
+	MOV	@R0,#200
+	INC	R0
+	MOV	@R0,#0
+	CALL	DELAY1
+;
+	MOV	R0,#ADDRSC
+	MOV	R1,#ADDR
+	CALL	SETP
+	CALL	SENDBLK
+	ADD	A,#-ACK
+	JZ	ISNVERBL
+	JMP	SENDAB
+;		
+ISNVERBL:
+	CALL	TRYNEXT
+	JNC	NVERBL
+	JMP	SROEND
+;
+;----------------------------
+;--- Blank Check Device from IBM
+;----------------------------
+;
+PRGBLANK:
+;
+	CALL	SETUPD
+BLERBL:	CALL	RESSET
+BLERB:	
+	CALL	SETADDR		;Set address
+	SEL	MB1
+	CALL	READPB
+	SEL	MB0
+	MOV	R1,#BYTEP
+	MOV	A,@R1
+;
+;---	Blank check device procedure
+;	
+	CPL	A
+	JZ	BLEND
+	MOV	A,#1
+	MOV	R0,#DELC
+	ADD	A,@R0
+	MOV	@R0,A
+	JNC	BLEND
+	INC	R0
+	INC	@R0
+BLEND:
+;
+;---	End check sum procedure
+;
+	SEL	MB1
+	CALL	NEXTADDR
+	SEL	MB0
+	JNC	BLERB
+;
+;---	TX Check SUM
+;
+	CALL	SENDDELC
+;
+	CALL	RXONEB
+	MOV	TMPRA,A
+	ADD	A,#-ACK
+	JZ	ISNBLBL
+	JMP	SROEND
+;
+;	MOV	R0,#ADDRSC
+;	MOV	R1,#ADDR
+;	CALL	SETP
+;	JMP	BLERBL
+;		
+ISNBLBL:
+	CALL	TRYNEXT	
+	JNC	BLERBL
+	JMP	SROEND
+
+;ISNBLBL:
+;	MOV	R0,#DELC
+;	MOV	A,@R0
+;	JNZ	BLCHE
+;	INC	R0
+;	MOV	A,@R0
+;	JNZ	BLCHE
+;	CALL	TRYNEXT	
+;	JNC	BLERBL
+;BLCHE:
+;	JMP	SROEND
+
+
+;
+;----------------------------
+;--- Set baud rate from IBM
+;----------------------------
+;
+;	data+2 - BAUD RATE: 0 - 38400, 1-19200, 2-9600, 3-1200
+;	data+3 - N/A
+;	data+4 - N/A
+;	data+5 - N/A
+;	data+6 - N/A
+;	data+7 - N/A
+;
+SBAUD:
+	MOV	R0,#DATA+2
+	MOV	R1,#ALGOR
+;
+	MOV	A,@R1
+	ANL	A,#11110011B
+	MOV	@R1,A
+;
+	MOV	A,@R0
+	ANL	A,#03H
+	RL	A
+	RL	A
+	ORL	A,@R1
+	MOV	@R1,A	
+	JMP	NEW
+;
+;----------------------------
+;--- Set CHIP from IBM
+;----------------------------
+;
+;	data+2 - Chip's type : 0-2716; 1-2732...
+;	data+3 - N/A
+;	data+4 - VCC During programming : 0-5; 1-6...
+;	data+5 - VPP During programming : 0-12; 1-13...	
+;	data+6 - Programming Algorithm  : 0-Normal; 1-Intelligent...
+;
+SETIC:
+	MOV	R1,#GRP1
+	MOV	R0,#DATA+2
+	MOV	A,@R0
+	ADD	A,#(LOW TGRP1)
+	MOV	@R1,A
+;
+	MOV	R1,#GRP0
+	MOV	R0,#DATA+5
+	MOV	A,@R0
+	ADD	A,#(LOW TGRP0)
+	MOV	@R1,A
+;
+	CALL	SG1ON
+	CALL	SG0ON
+;
+	MOV	R0,#DATA+6
+	MOV	R1,#ALGOR
+	MOV	A,@R0
+	ANL	A,#03H
+	ORL	A,@R1
+	MOV	@R1,A
+;
+	MOV	R0,#DATA+4	;VCC Number
+	MOV	A,@R0
+	ADD	A,#(LOW GRPVCC)
+	MOVP3	A,@A
+	ORL	A,#(VPPEN + VCCEN)
+	SWAP	A	 	;MOVE VCC IN HIGH 4 BITS
+	ANL	A,#0F0H
+;
+	MOV	R1,#ALGOR
+	ORL	A,@R1		;ADD VCC
+	MOV	@R1,A
+;
+MB1RE:	SEL	MB1
+	CALL	RESETE
+	SEL	MB0
+	JMP	NEW
+;
+;----------------------------
+;--- Set CHIP'S POWER from IBM
+;----------------------------
+;
+;	data+2 : LOW  initial pulse
+;	data+3 : HIGH initial pulse
+;	data+4 : pulse count
+;	data+5 : N/A
+;	data+6 : LOW  overprogram pulse
+;	data+7 : HIGH overprogram pulse
+;
+SETIP:
+	SEL	RB0
+	MOV	R0,#DATA+2
+	MOV	R1,#IPULSE
+	CALL	SETP
+	MOV	R0,#DATA+4
+	MOV	R1,#NPULSE
+	CALL	SETP
+	MOV	R0,#DATA+6
+	MOV	R1,#OPULSE
+	CALL	SETP
+;
+	JMP	MB1RE
+;
+;---
+;
+ONPVCC:
+	MOV	A,#VCC5V
+	CALL	OUT2P5
+	MOV	A,#(VCC5V OR VCCEN)
+	CALL	OUT2P5
+;
+	RET
+;
+;--- ON all lamps
+;
+ONLAMP:
+	CALL	FIXINS		;ON regime lamp
+;
+	MOV	A,#PRGL
+	CALL	OUT2P7		;swith READY+PRG lamps
+;
+	RET
+;
+;--- END OF PROGRAMM BANK0
+;
+;==========================================================================
+;
+;--- START OF BANK1 PROGRAM
+;
+	ORG	0800H
+;
+MB1BEGIN:
+	MOV	R1,#DATA+2
+	MOV	A,@R1		;Number command
+	ADD	A,#(LOW TCOM1)-1
+	JMPP	@A
+;
+TCOM1:
+	DB	(LOW TEST00)
+;TCOME:
+;
+;---	JMP'S to subroutine
+;
+TEST00:	JMP	STEST00
+;
+;---
+;
+STEST00:
+;!!!_start
+	STOP	TCNT
+	DIS	I
+	DIS	TCNTI
+TES:	MOV	A,#0
+	CALL	O1T1P7
+	CALL	DELAYB5
+	MOV	A,#0FFH
+	CALL	O1T1P7
+	CALL	DELAYB5
+	JMP	TES
+;!!!_end
+;
+;--- Set next address for programming byte
+;	
+NEXTADDR:
+	MOV	R0,#NUMBER
+	MOV	A,@R0
+	DEC	A
+	MOV	@R0,A
+	JZ	DECHIGHT
+;
+NEXTBH:	MOV	R0,#ADDR
+	INC	@R0
+	MOV	A,@R0
+	JNZ	NEXT1
+	INC	R0
+	INC	@R0
+NEXT1:	CLR	C
+	RET
+
+DECHIGHT:
+	INC	R0
+	MOV	A,@R0
+	JZ	NOHIGHT
+	DEC	A
+	MOV	@R0,A
+	JNZ	NEXTBH
+;
+NOHIGHT:
+	CLR	C
+	CPL	C
+	RET
+;
+;---Delay 100mS	  (only for debug program)
+;
+DD:	
+	MOV	TMPR,#84
+DDM1:	MOV	DELAYR,#236
+DDM2:	DJNZ	DELAYR,DDM2
+	DJNZ	TMPR,DDM1
+	MOV	TMPR,#3
+DDM3:	DJNZ	TMPR,DDM3
+	RET
+;
+;---Delay 50mS
+;
+DELAYB5:	
+	MOV	DELAYR,#025
+DB52:	MOV	A,#0FFH
+DB51:
+	DEC	A
+	JNZ	DB51
+	DEC	DELAYR
+	MOV	A,DELAYR
+	JNZ	DB52
+	RET
+;
+DEL5TCY:
+	MOV	A,#5
+TCY:	DEC	A
+	JNZ	TCY
+	RET
+;
+DMM1:
+	MOV	A,#8
+DM10:
+	DEC	A
+	JNZ	DM10
+	MOV	R0,#DELC	;Address for number 0.1Ms delays (X)
+	MOV	A,@R0		;A=number 1Ms delays (X)
+	DEC	A		;DEC X
+	MOV	@R0,A		;Store X
+	JNZ	DM10
+	RET
+
+DELAYM1:
+	MOV	A,#13		;((100-35)/7.5) 35mkS - TIME for run
+				;commands it's subroutine
+DDD:	DEC	A		;DELAY 10 MKS
+	JNZ	DDD
+	MOV	R0,#DELC	;Address for number 0.1Ms delays (X)
+	MOV	A,@R0		;A=number 1Ms delays (X)
+	DEC	A		;DEC X
+	MOV	@R0,A		;Store X
+	JNZ	DELAYM1		;X=0?
+	MOV	R0,#DELC1
+	MOV	A,@R0
+	JZ	DDD3
+	DEC	A
+	MOV	@R0,A
+	JMP	DELAYM1
+DDD3:	RET
+;
+;---
+;
+
+;
+;
+;----------------------------
+;--- Reset subroutine
+;----------------------------
+;		
+RESET:	
+	CLR	A
+	CALL	O1T2P5		;VPP desable
+	CALL	DELAYB5
+	CALL	O1T2P6		
+	CALL	DELAYB5
+	CALL	DELAYB5
+;
+	MOV	A,#CSORIG
+	OUTL	P2,A		;all chips desable /P2/
+;
+	MOV	A,#(OSCEN OR TXBIT)
+	OUTL	P1,A		;reset P1 
+;
+	CLR	A
+	CALL	O1T0P4
+	CALL	O1T0P5		;ROM data BUS = 0
+;
+	CALL	O1T0P6
+	CALL	O1T1P4
+	CALL	O1T1P5
+	CALL	O1T1P6		;ROM address BUS = 0
+;
+	MOV	A,#RDEN
+	MOVX	@R0,A		;SET ALL TM9 LINE TO 0 exclude d7
+;
+	MOV	TMPKEY,#(K1+K2+K3)	;Keys is not pressed
+;
+	RETR
+;
+;----------------------------
+;--- Out expander port
+;    subroutines
+;----------------------------
+;
+O1T0P7:				;Out byte on 7's port 8243 /0/
+	ANL	P2,#CS0
+	MOVD	P7,A
+O1T0E:	ORL	P2,#NOT CS0
+	RET
+;
+O1T0P6:	ANL	P2,#CS0
+	MOVD	P6,A
+	JMP	O1T0E
+;
+O1T0P5:	ANL	P2,#CS0
+	MOVD	P5,A
+	JMP	O1T0E
+;
+O1T0P4:	ANL	P2,#CS0
+	MOVD	P4,A
+	JMP	O1T0E
+;
+O1T1P7:	ANL	P2,#CS1
+	MOVD	P7,A
+O1T1E:	ORL	P2,#NOT CS1
+	RET
+;
+O1T1P6:	ANL	P2,#CS1
+	MOVD	P6,A
+	JMP	O1T1E
+;
+O1T1P5:	ANL	P2,#CS1
+	MOVD	P5,A
+	JMP	O1T1E
+;
+O1T1P4:	ANL	P2,#CS1
+	MOVD	P4,A
+	JMP	O1T1E
+;
+O1T2P7:	ANL	P2,#CS2
+	MOVD	P7,A
+O1T2E:	ORL	P2,#NOT CS2
+	RET
+;
+O1T2P6:	ANL	P2,#CS2
+	MOVD	P6,A
+	JMP	O1T2E
+;
+O1T2P5:	ANL	P2,#CS2
+	MOVD	P5,A
+	JMP	O1T2E
+;
+O1T2P4:	ANL	P2,#CS2
+	MOVD	P4,A
+	JMP	O1T2E
+;
+;--- SET START REGIME
+;
+RESETS:
+	CLR	A
+	CALL	O1T0P7		;ON all laps
+	CALL	O1T1P7
+	CALL	O1T2P7
+	CALL	DELAYB5		;delay 100mS
+;
+	MOV	A,#00FFH	;OFF all laps
+	CALL	O1T0P7
+	CALL	O1T1P7
+	CALL	O1T2P7
+	CALL	DELAYB5		;delay 100mS
+;
+;---	set START regime
+;
+	MOV	A,#V12
+	CALL	O1T2P4		;12V 
+;
+	MOV	R0,#GRP0
+	MOV	@R0,#(LOW TV12L);store VPP
+	MOV	A,#V12L
+	CALL	O1T0P7		;12V lamp
+;
+	MOV	R0,#GRP1
+	MOV	@R0,#(LOW TC2764L)	;store 2764 regime
+	MOV	A,#C2764L
+	CALL	O1T1P7		;2764
+;
+	SEL	RB1
+	MOV	TXBC,#0FFH
+	SEL	RB0	
+;
+RESETE:	MOV	A,#READYL
+	CALL	O1T2P7		;READY for programming
+	MOV	GRP,#1		;Select first group regimes
+;
+	MOV	R0,#CTEST		;Addr test cell
+	MOV	@R0,#(LOW TESTGE)	;
+;
+	CLR	F1		;F1 - Timer interrupt flag
+;
+	ENT0	CLK		;Enable sinhro impulses at T0 output
+;
+	MOV	RXCOM,#NATTEMP	;Number attempts RX command
+;
+	SEL	RB1
+	MOV	RXBYC,#0	;Number received bytes = 0
+	MOV	RXBA,#DATA	;Address for receive data buffer
+;
+	RETR
+;
+RESETM:
+	MOV	A,#(LOW REGIME)	;Address for Timer interrupt
+	MOV	R0,#JMPTIM
+	MOV	@R0,A		;Set TIMER interrupt START address
+	MOV	A,#TREGIME	;300mS delay between 
+				;swith lamps
+	CALL	SETTIME		;Set time constant
+;
+	SEL	RB0 
+	MOV	INGRP,#1	;flag = 1  lamps is ON
+	MOV	GRP,#0		;Group 0
+	EN	I		;Enable interapt (For recive)
+	RET
+;
+;---Set time constant for REGIME subroutine
+;
+SETTIME:
+	MOV	TIME,A			;300mS delay between 
+					;swith lamps
+	MOV	A,#NOT(20000/80-1)	;20mS!!!
+	MOV	T,A			;Load timer
+	SEL	RB1
+	MOV	MS,A			;Save time constant
+;
+	RETR
+;
+;---
+;
+PRGIMP:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW PRGIJMP)
+	JMPP	@A
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+PRGIJMP:
+	DB	(LOW II2716)
+	DB	(LOW II2732)
+	DB	(LOW II2764)
+	DB	(LOW II27128)
+	DB	(LOW II27256)
+	DB	(LOW II27512)
+	DB	(LOW II8048)
+	DB	(LOW II8051)
+	DB	(LOW II8755)
+	DB	(LOW II27C64)
+	DB	(LOW II27C128)
+	DB	(LOW II27C256)
+	DB	(LOW II27C512)
+	DB	(LOW II27I16)
+;
+;---
+II27I16:
+II2716:	  JMP	I2716
+;
+II2732:	  JMP	I2732
+;
+II27C64:  
+II27C128: JMP	I27C64
+;
+II2764:	  
+II27128:  JMP	I2764
+;
+II27C256: JMP	I27C256
+II27256:  JMP	I27256
+II27C512: JMP	I27C512
+II27512:  JMP	I27512
+II8048:	  JMP	I8048
+II8051:	  JMP	I8051
+II8755:	  JMP	I8755
+;
+;---
+;
+;
+;--- swith regime chip
+;
+CHIP:
+	CALL	LSTRTA		;Load START address=0000
+	MOV	R0,#GRP1	;Addr CHIP regime
+	MOV	A,@R0		;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW TJMP)
+	MOV	R0,#ADDRSC	;LOW  Address work registry for 
+				;NUMBER PRG BYTES
+	JMPP	@A
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+TJMP:
+	DB	(LOW JJ2716)
+	DB	(LOW JJ2732)
+	DB	(LOW JJ2764)
+	DB	(LOW JJ27128)
+	DB	(LOW JJ27256)
+	DB	(LOW JJ27512)
+	DB	(LOW JJ8048)
+	DB	(LOW JJ8051)
+	DB	(LOW JJ8755)
+	DB	(LOW JJ27C64)
+	DB	(LOW JJ27C128)
+	DB	(LOW JJ27C256)
+	DB	(LOW JJ27C512)
+	DB	(LOW JJ27I16)
+;
+JJ27I16:
+JJ2716:	JMP	J2716
+JJ2732:	JMP	J2732
+JJ27C64:
+JJ2764:	JMP	J2764
+JJ27C128:
+JJ27128:JMP	J27128
+JJ27C256:
+JJ27256:JMP	J27256
+JJ27C512:
+JJ27512:JMP	J27512
+JJ8048:	JMP	J8048
+JJ8051:	JMP	J8051
+JJ8755:	JMP	J8755
+;
+;--- SET End address for Programming 2716
+;
+J2716:
+	MOV	@R0,#(LOW B2716)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B2716)	;Set HIGH END address
+	RET
+;
+;--- SET End address for Programming 2732
+;
+J2732:
+	MOV	@R0,#(LOW B2732)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B2732)	;Set HIGH END address
+	RET
+;
+;--- SET End address for Programming 2764
+;
+J2764:
+	MOV	@R0,#(LOW B2764)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B2764)	;Set HIGH END address
+	RET
+;
+;--- SET End address for Programming 27128
+;
+J27128:
+	MOV	@R0,#(LOW B27128)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B27128)	;Set HIGH END address
+	RET
+;
+;--- SET End address for Programming 27256
+;
+J27256:
+	MOV	@R0,#(LOW B27256)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B27256)	;Set HIGH END address
+	RET
+;
+;--- SET End address for Programming 27512
+;
+J27512:
+	MOV	@R0,#(LOW B27512)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B27512)	;Set HIGH END address
+	RET
+;
+;
+;--- SET End address for Programming 8048
+;
+J8048:
+	MOV	@R0,#(LOW B8048)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B8048)	;Set HIGH END address
+	RET
+J8051:
+	JMP	START
+;
+J8755:
+	MOV	@R0,#(LOW B8755)	;SET LOW byte END Address
+	INC	R0			;HIGH Address work registry for
+					;End address PRG bytes
+	MOV	@R0,#(HIGH B8755)	;Set HIGH END address
+	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				2716
+;----------------------------
+;
+I2716:
+	ORL	P1,#NOT CSPRG
+	CALL	DELAYM1		;Programm byte
+	ANL	P1,#CSPRG
+      	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				2764
+;				27128
+;----------------------------
+;
+I2764:
+I27128:
+	ANL	P1,#CSPRG
+	ANL	P2,#CS1		;Select expander port for PRG pulse
+	MOV	A,#(NOT ROMA14)	;Set prg pulse
+	ANLD	P6,A
+	ORL	P2,#NOT CS1
+	CALL	DELAYM1		;Programm byte
+	ANL	P2,#CS1
+	MOV	A,#ROMA14	;Clear PRG pulse
+	ORLD	P6,A
+;
+	ORL	P2,#NOT CS1
+;	ORL	P1,#NOT CSPRG
+;
+      	RET
+;----------------------------
+;--- Set Programming pulse for :
+;				27C64
+;				27C128
+;----------------------------
+;
+I27C64:
+I27C128:
+;!!!!
+	ANL	P1,#CSPRG
+	ANL	P2,#CS1		;Select expander port for PRG pulse
+	MOV	A,#(NOT ROMA14)	;Set prg pulse
+	ANLD	P6,A
+	ORL	P2,#NOT CS1
+	CALL	DMM1		;Programm byte
+	ANL	P2,#CS1
+	MOV	A,#ROMA14	;Clear PRG pulse
+	ORLD	P6,A
+;
+	ORL	P2,#NOT CS1
+;!!!!
+	ORL	P1,#NOT CSPRG
+      	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				27256
+;----------------------------
+;
+I27256:
+	ANL	P1,#CSPRG
+	CALL	DELAYM1
+	ORL	P1,#NOT CSPRG
+	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				27C256
+;----------------------------
+;
+I27C256:
+	ANL	P1,#CSPRG
+	CALL	DMM1
+	ORL	P1,#NOT CSPRG
+	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				27512
+;----------------------------
+;
+I2732:
+I27512:
+	ORL	P1,#NOT CSPRG
+;
+	MOV	A,#(OEEN OR OEVPP)
+	CALL	O1T2P6
+;	
+	ANL	P1,#CSPRG
+	CALL	DELAYM1
+	ORL	P1,#NOT CSPRG
+;
+	MOV	A,#0
+	CALL	O1T2P6
+;
+	RET
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				27C512
+;----------------------------
+;
+I27C512:
+	ORL	P1,#NOT CSPRG
+;
+	MOV	A,#(OEEN OR OEVPP)
+	CALL	O1T2P6
+;	
+	ANL	P1,#CSPRG
+	CALL	DMM1
+	ORL	P1,#NOT CSPRG
+;
+	MOV	A,#0
+	CALL	O1T2P6
+;
+	RET
+;
+;
+I8755:
+;	ANL	P2,#CS1		;OLD VERSION
+;	MOV	A,#ROMA15
+;	ORLD	P6,A
+;	ORL	P2,#NOT CS1
+;
+;	MOV	A,#A15VPP	;OLD VERSION
+;	CALL	O1T2P6
+;
+	MOV	A,#(A4VPP + RDEN)	;NEW VERSION
+	MOVX	@R0,A
+;
+
+	CALL	DELAYM1
+;	MOV	A,#0		;OLD VERSION
+;	CALL	O1T2P6
+;
+	MOV	A,#RDEN		;NEW VERSION
+	MOVX	@R0,A
+;
+;
+;	ANL	P2,#CS1
+;	MOV	A,#(NOT ROMA15)
+;	ANLD	P6,A
+;	ORL	P2,#NOT CS1
+;
+	RET
+I8051:
+	JMP	I8051
+;
+;
+;----------------------------
+;--- Set Programming pulse for :
+;				8048
+;----------------------------
+;
+I8048:
+	ANL	P2,#CS2		;Set CS for 8243
+	MOV	A,#(NOT OEEN)	;Set PROG to 0V
+	ANLD	P6,A
+	CALL	DEL5TCY		;Delay 4tcy
+;
+	MOV	A,#A11VPP	;Set VDD to 25V
+	ORLD	P6,A
+	CALL	DEL5TCY		;Delay 4tcy
+;
+	MOV	A,#OEVPP	;Set PROG TO 25V
+	ORLD	P6,A
+	MOV	A,#OEEN		;Set PROG 25V enable
+	ORLD	P6,A
+	CALL	DELAYM1		;Delay 50 mS
+;
+	MOV	A,#(NOT OEEN)	;Reset PROG to 0V
+	ANLD	P6,A
+	MOV	A,#(NOT OEVPP)	;Reset PROG 25V TO 0V
+	ANLD	P6,A
+	CALL	DEL5TCY		;Delay 4tcy
+;
+	MOV	A,#(NOT A11VPP)	;Reset VDD to 5V
+	ANLD	P6,A
+	CALL	DEL5TCY		;Delay 4tcy
+;
+	MOV	A,#OEEN		;Set PROG to 5V (for verify)
+	ORLD	P6,A
+	ORL	P2,#(NOT CS2)	;Desable CS for 8243
+	ANL	P2,#CS0		;Enable CS for 8243 /0/
+	MOV	A,#ROMA0
+	ORLD	P6,A		;TO -> "1" for Verify
+	ORL	P2,#(NOT CS0)	;Desable CS for 8243 /0/
+	JMP	DEL5TCY
+;
+;---
+JPP8755:
+;	CALL	ONPVCC
+;
+	MOV	A,#(ROMA1 OR ROMA3)
+	CALL	O1T0P6			;CLK (3p) -> "0"
+					;RESET (4p) -> "1"
+					;CE2 (2p) -> "1"
+	ANL	P1,#NOT OSCEN		;CLK disable
+	MOV	A,#(ROMA14 OR ROMA15)	;ALE (11p) -> "1"
+	CALL	O1T1P6			;VPP -> +5V
+;
+;OLD	MOV	A,#ROMA7	 	;IOR,IOW (8p,10p) -> "1"
+;	
+	MOV	A,#(ROMA4 OR ROMA7) 	;IOR,IOW (8p,10p) -> "1", VDD - +5V
+	CALL	O1T1P4
+	ORL	P1,#(NOT CSPRG)	;RD (9p) -> "1"
+	MOV	A,#(NOT ROMA12)	;IO/M (7p) -> "0"
+	CALL	O1T1P6	
+;
+	CALL	SETVPP
+	MOV	A,#(VPPEN OR VCC5V OR VCCEN)
+	CALL	O1T2P5
+;
+	MOV	A,#ROMA1
+	JMP	O1T0P6			;CLK (3p) -> "0"
+;
+JPP8048:
+;	CALL	ONPVCC
+;
+	ANL	P1,#NOT OSCEN		;CLK disable
+;
+	MOV	A,#ROMA0
+	CALL	O1T0P6		;CLK ENABLE
+				;T0 -> +5V
+	MOV	A,#(A11VPP + OEEN)
+	CALL	O1T2P6		;VDD -> +5V
+				;PROG -> +5V
+	ANL	P2,#CS0
+	MOV	A,#NOT ROMA0	;SET T0 -> 0
+	ANLD	P6,A		;(THIS SELECT PROGRAMMING MODE)
+	ORL	P2,#NOT CS0
+;
+	MOV	A,#(OSCA1 + EA8755)
+	MOVX	@R0,A		;SET OSC & 
+				;SET EA -> +25V
+	CALL	SETVPP
+	MOV	A,#(VPPEN OR VCC5V OR VCCEN)
+	CALL	O1T2P5
+;
+	RET
+;
+;---
+;
+;---
+;
+	ORG	0B00H
+;
+	DB	V12L	;
+	DB	V13L	;
+	DB	V21L	;
+	DB	V23L	;
+	DB	V25L	;
+	DB	VTESTL	;
+	DB	0000	;
+;
+;--- 1 Group registry
+;
+	DB	C2716L	;0
+	DB	C2732L	;1
+	DB	C2764L	;2
+	DB	C27128L	;3
+	DB	C27256L	;4
+	DB	C27512L ;5
+	DB	C8048L	;6
+	DB	C8051L	;7
+	DB	C8755L	;8
+	DB	C27C64L	;9
+	DB	C27C128	;10
+	DB	C27C256	;11
+	DB	C27C512	;12
+	DB	C27I16L	;13
+;
+	DB	0000	;
+;
+;---
+;
+PRGBYTE:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW PRGJMP)
+	JMPP	@A
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+PRGJMP:
+	DB	(LOW MMALL)	;2716
+	DB	(LOW MMALL)	;2732
+	DB	(LOW MMALL)	;2764
+	DB	(LOW MMALL)	;27128
+	DB	(LOW MMALL)	;27256
+	DB	(LOW MMALL)	;27512
+	DB	(LOW MM8048)	;8048
+	DB	(LOW MM8051)	;8051
+	DB	(LOW MM8755)	;8755
+	DB	(LOW MMALL)	;27c64
+	DB	(LOW MMALL)	;27c128
+	DB	(LOW MMALL)	;27c256
+	DB	(LOW MMALL)	;27c512
+;---
+MM8048:	JMP	M8048
+;
+MM8051:	RET
+;
+MM8755:	JMP	M8755
+;---
+MMALL:	
+	MOV	R0,#ALGOR
+	MOV	A,@R0
+	ANL	A,#03H
+	JZ	NORMAL
+	DEC	A
+	JZ	INTEL
+	DEC	A
+	JZ	QPULSE
+	RET
+;
+;----------------------------
+;--- Normal Algorithm
+;----------------------------
+;
+NORMAL:
+;	DELAYS	500		;50mS PRG Pulse
+	CALL	DPRG
+;
+	CALL	VREADPB
+	CALL	COMP
+;
+	JNZ	ERRPB
+	JMP	PRGBEND
+;
+;
+;----------------------------
+;--- Quik pulse Algorithm
+;----------------------------
+;
+QPULSE:
+;
+	MOV	R0,#NPULSE
+	MOV	A,@R0
+	MOV	ATTEMP,A	;Number attempt
+PRGQ:
+	CALL	DPRG 
+	DJNZ	ATTEMP,PRGQA
+	CLR	C
+	CPL	C
+	RET
+;
+PRGQA:	CALL	VREADPB		;Read programming byte & Verify with
+;				;original byte (Verify regime)
+	CALL	COMP
+	JNZ	PRGQ		;Not compare. Repeat programming
+	CLR	C	
+	RET
+;
+;
+;----------------------------
+;--- Intelligent Algorithm
+;----------------------------
+;
+INTEL:
+	MOV	R0,#NPULSE
+	MOV	A,@R0
+	MOV	ATTEMP,A	;Number attempt
+PRGNEXT:
+	CALL	DPRG
+;
+	DJNZ	ATTEMP,PRGIA	;Number attempt = X?
+	CALL	VREADPB		;Read programming byte & Verify with
+				;original byte (Verify regime)
+	CALL	COMP
+	JNZ	ERRPB		;Not compare. Device failed
+	JMP	PRG4X
+;
+PRGIA:
+	CALL	VREADPB		;Read programming byte & Verify with
+				;original byte (Verify regime)
+	CALL	COMP
+	JNZ	PRGNEXT		;Not compare. Repeat programming
+PRG4X:
+;---
+	MOV	R0,#OPULSE
+	MOV	R1,#DELC
+	SEL	MB0
+	CALL	SETP
+	SEL	MB1
+	
+	MOV	R0,#NPULSE
+	MOV	A,ATTEMP
+	CPL	A
+	INC	A
+	ADD	A,@R0	
+	MOV	R0,#DELC
+;
+	CALL	MUL
+	CALL	PRGIMP
+;	
+PRGBEND:CLR	C	
+	RET
+ERRPB:
+	CLR	C
+	CPL	C
+	RET
+
+;
+;--- Programm with delay IPULE
+;
+DPRG:
+	INC	PC
+	MOV	R0,#IPULSE
+	MOV	R1,#DELC
+	SEL	MB0
+	CALL	SETP
+	SEL	MB1
+	JMP	PRGIMP
+;
+;----------------------------
+;--- Programm byte FOR:
+;			8748
+;----------------------------
+;
+M8048:
+	MOV	A,#A11VPP	;SET VDD -> 25V
+	CALL	O1T2P6
+	CALL	DEL5TCY
+;
+	MOV	A,#(A11VPP + OEVPP + OEEN)
+	CALL	O1T2P6
+;
+;	DELAYS	500		;50mS PRG Pulse
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 500)
+	INC	R0
+	MOV	@R0,#(HIGH 500)
+;
+	CALL	PRGIMP		;PROGRAMMING BYTE
+;
+	MOV	A,#(ROMA0 + ROMA3) ;T0 & OSC & RESET -> +5V
+	CALL	O1T0P6
+;
+	CALL	READPB		;READ PRG BYTE IN VERIFY REGIME
+	CALL	COMP
+;
+	MOV	TMPRA,A
+	MOV	A,#0		;TO & RESET -> 0 OSC->0
+	CALL	O1T0P6
+	MOV	A,TMPRA
+;
+	JNZ	ERRPB1
+;
+	CLR	C
+	RET
+;
+;----------------------------
+;--- Programm byte FOR:
+;			8755
+;----------------------------
+;
+M8755:
+	MOV	ATTEMP,#25	;Number PRG pulse = 25
+;
+	ANL	P2,#CS0
+	MOV	A,#ROMA0
+	ORLD	P6,A
+	ORL	P2,#(NOT CS0)
+;
+M55AG:
+;	DELAYS	10		;1mS PRG Pulse
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 10)
+	INC	R0
+	MOV	@R0,#(HIGH 10)
+	CALL	PRGIMP
+	MOV	R0,#DELC
+;	DELAYS	10		;1mS Pulse After PRG pulse
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 10)
+	INC	R0
+	MOV	@R0,#(HIGH 10)
+	CALL	DELAYM1
+;
+	DEC	ATTEMP
+	MOV	A,ATTEMP
+	JNZ	M55AG
+;
+ 	ANL	P2,#CS0
+	MOV	A,#(NOT ROMA0)
+	ANLD	P6,A
+	ORL	P2,#(NOT CS0)
+;
+	CALL	VREADPB
+	CALL	COMP
+;
+	JNZ	ERRPB1
+	CLR	C
+	RET
+;
+ERRPB1:
+	CLR	C
+	CPL	C
+	RET
+;
+;
+	ORG	0C00H
+;
+;---
+;
+;--- MULTIPLY OPERATIONS
+;
+;	A*@R0
+;
+MUL:
+	MOV	TMPRA,#00
+	MOV	COUNT,#8
+MPY8LP:
+	JB0	MPY8A
+	XCH	A,TMPRA
+	CLR	C
+	RRC	A
+	XCH	A,TMPRA
+	RRC	A
+	DJNZ	COUNT,MPY8LP
+;
+MULE:	MOV	@R0,A
+	INC	R0
+	MOV	A,TMPRA
+	MOV	@R0,A
+	RET
+;
+MPY8A:
+	XCH	A,TMPRA
+	ADD	A,@R0
+	RRC	A
+	XCH	A,TMPRA
+	RRC	A
+	DJNZ	COUNT,MPY8LP
+	JMP	MULE
+;
+;--- Compare original byte whis byte in programming chip
+;
+COMP:
+;
+	MOV	R0,#BYTEO
+	MOV	R1,#BYTEP
+;
+	MOV	A,@R1		;Address PRG byte
+	CPL	A		;
+	INC	A
+	ADD	A,@R0		;Compare original & PRG byte
+	RET
+;
+;--- Read byte
+;
+INBYTE:
+	MOV	R0,A
+IN11:	ANL	P2,#CS0
+	MOVD	A,P5
+	ANL	A,#00001111B
+	SWAP	A
+	MOV	@R0,A
+	MOVD	A,P4
+	ANL	A,#00001111B
+	ORL	A,@R0
+	MOV	@R0,A
+	ORL	P2,#(NOT CS0)
+	RET
+;
+;---
+;
+M0P4:
+	MOV	A,TESTR
+	CALL	O1T0P4
+	CALL	RESRX
+	CALL	O1T0P4
+	JZ	M0P4
+	RET
+M0P5:
+	MOV	A,TESTR
+	CALL	O1T0P5
+	CALL	RESRX
+	CALL	O1T0P5
+	JZ	M0P5
+	RET
+M0P6:
+	MOV	A,TESTR
+	CALL	O1T0P6
+	CALL	RESRX
+	CALL	O1T0P6
+	JZ	M0P6
+	RET
+M1P4:
+	MOV	A,TESTR
+	CALL	O1T1P4
+	CALL	RESRX
+	CALL	O1T1P4
+	JZ	M1P4
+	RET
+M1P5:
+	MOV	A,TESTR
+	CALL	O1T1P5
+	CALL	RESRX
+	CALL	O1T1P5
+	JZ	M1P5
+	RET
+M1P6:
+	MOV	A,TESTR
+	CALL	O1T1P6
+	CALL	RESRX
+	CALL	O1T1P6
+	JZ	M1P6
+	RET
+;	
+RESRX:
+	CALL	DEL01MS
+;
+	SEL	RB1
+	MOV	A,RXBYC
+	SEL	RB0
+	RET
+;	
+DEL01MS:
+;	DELAYS	1		;0.1 ms
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 01)
+	INC	R0
+	MOV	@R0,#(HIGH 01)
+;
+	JMP	DELAYM1
+;
+;---
+;
+;
+;	SEL	MB1
+;	CALL	TTTTT
+;	SEL	MB0
+;
+;!!!
+TTTTT:	STOP	TCNT
+	DIS	TCNTI
+	DIS	I
+;
+TTTTT0:
+	MOV	R0,#ROMS
+	MOV	A,@R0
+	SWAP	A
+	CPL	A
+	CALL	O1T1P7
+;	SEL	MB1
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	CALL	DD
+;	SEL	MB0
+;
+	MOV	R0,#ROMS
+	MOV	A,@R0
+	CPL	A
+	CALL	O1T1P7
+;	SEL	MB1
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	CALL	DD
+;	SEL	MB0
+;	
+	RET
+;      	JMP	TTTTT0
+;!!!
+
+;
+;---
+;
+	ORG	0D00H
+;
+;--- Read byte with programming chip (in verify mode)
+;
+VREADPB:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW VERJMP)
+	JMPP	@A
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+VERJMP:
+	DB	(LOW VV2716)
+	DB	(LOW VV2732)
+	DB	(LOW VV2764)
+	DB	(LOW VV27128)
+	DB	(LOW VV27256)
+	DB	(LOW VV27512)
+	DB	(LOW VV8048)
+	DB	(LOW VV8051)
+	DB	(LOW VV8755)
+	DB	(LOW VV27C64)
+	DB	(LOW VV27C128)
+	DB	(LOW VV27C256)
+	DB	(LOW VV27C512)
+	DB	(LOW VV27I16)
+;
+VV27I16:
+VV2716:	JMP	V2716
+;
+VV2732:	
+	JMP	V2732
+VV27512:
+VV27C512:
+	JMP	V27512
+;
+VV2764:	
+VV27128:
+	JMP	V27C64
+VV27256:
+VV27C256: 
+	JMP	V27256
+;
+VV27C64:  JMP	V27C64  
+VV27C128: JMP	V27C128
+;
+VV8048:	
+;	JMP	V8048
+	MOV	R1,#BYTEP	;WRITE FICTING BYTE
+	MOV	@R1,#0FFH	;MAY NOT READ PRG BYTE 
+	RET			;BEFORE PROGRAMMING
+;
+VV8051:
+VV8755:	JMP	V8755
+;
+;
+;--- Verify byte at 8048 CHIP
+;
+V8048:
+;	ANL	P2,#CS0		;SET RESET TO HIGH
+;	MOV	A,#00001000B
+;	ORLD	P6,A
+;	ORL	P2,#(NOT CS0)
+;
+	MOV	A,#BYTEP
+	CALL	INBYTE		;READ BYTE
+;
+;	ANL	P2,#CS0		;SET RESET TO LOW
+;	MOV	A,#00001000B	;FOR SET LAST ADDRESS
+;	ANLD	P6,A
+;	ORL	P2,#(NOT CS0)
+;
+	RET
+;
+;--- Verify byte at 8755 CHIP
+;
+V8755:
+	SEL	MB0
+	CALL	SETA55
+	SEL	MB1
+READP55:
+;	ANL	P2,#CS2		;OLD VERSION
+;	MOV	A,#(NOT ADDREN)	;OLD VERSION
+;	ANLD	P7,A		;OLD VERSION
+;	ORL	P2,#NOT CS2	;OLD VERSION
+;
+	MOV	A,#0
+	MOVX	@R0,A
+;
+	ANL	P1,#CSPRG
+;
+	MOV	A,#BYTEP
+	CALL	INBYTE
+;
+	ORL	P1,#(NOT CSPRG)
+;
+	RET
+
+V2716:
+	ANL	P1,#CSPRG
+	CALL	VALLB
+	JMP	OEENOFF
+V2732:
+	ANL	P1,#CSPRG
+	CALL	VALLB
+	ORL	P1,#NOT CSPRG
+	RET
+V27C64:
+	ANL	P1,#CSPRG
+	CALL	VALLB
+	JMP	OEENOFF
+V27C128:
+	CALL	VALLB
+	CALL	OEENOFF
+	ORL	P1,#NOT CSPRG
+	RET
+V27256:
+	CALL	VALLB
+	JMP	OEENOFF
+V27512:
+	ANL	P1,#CSPRG
+	CALL	VALLB
+	CALL	OEENOFF
+	ORL	P1,#NOT CSPRG
+	RET
+;
+VALLB:
+	MOV	R0,#BYTEO
+	MOV	A,@R0
+	CPL	A		;Set invers byte by programming chip DATA BUS
+	CALL	O1T0P4
+	SWAP	A
+	CALL	O1T0P5
+;
+	ANL	P2,#CS2		;OR TXBIT !!!
+;	CLR	A		;VPP Desable, OE Enable
+	MOV	A,#NOT OEEN
+	ANLD	P6,A
+;	
+	ORL	P2,#(NOT CS2)
+	MOV	A,#BYTEP
+	JMP	INBYTE
+;
+;---
+;
+OEENOFF:
+	ANL	P2,#CS2
+	MOV	A,#OEEN
+	ORLD	P6,A
+	ORL	P2,#NOT CS2
+	RET
+;
+;--- Read byte with programming chip
+;
+READPB:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW RDJMP)
+	JMPP	@A
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+RDJMP:
+	DB	(LOW RR2716)
+	DB	(LOW RR2732)
+	DB	(LOW RR2764)
+	DB	(LOW RR27128)
+	DB	(LOW RR27256)
+	DB	(LOW RR27512)
+	DB	(LOW RR8048)
+	DB	(LOW RR8051)
+	DB	(LOW RR8755)
+	DB	(LOW RR27C64)
+	DB	(LOW RR27C128)
+	DB	(LOW RR27C256)
+	DB	(LOW RR27C512)
+	DB	(LOW RR27I16)
+;
+RR27I16:
+RR2716:	
+RR2732:	
+RR2764:	
+RR27128:
+RR27256:
+RR27512:
+RR27C64:  
+RR27C128: 
+RR27C256: 
+RR27C512:JMP	V2716
+;
+RR8048:	JMP	V8048
+RR8051:
+RR8755:	JMP	READP55
+;
+;---
+;
+;----------------------------
+;--- Load start address for ROM (=0000)
+;----------------------------
+;
+LSTRTA:
+	MOV	R0,#ADDR	;LOW  Address work registry for PRG ADDR
+	MOV	@R0,#0H		;SET LOW  start ADDR to 0
+	INC	R0		;HIGH Address work registry for PRG ADDR
+	MOV	@R0,#0H		;SET HIGH start ADDR to 0
+       	RET
+;
+;---
+;
+DEBUG:
+;!!!_start
+	STOP	TCNT
+	DIS	TCNTI
+;
+TES1:	MOV	A,#0
+	CALL	O1T1P7
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	MOV	A,#0FFH
+	CALL	O1T1P7
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	CALL	DD
+	CALL	DD
+;	RET
+	JMP	TES1
+;
+;---
+;
+	ORG	0E00H
+;
+;---
+;
+;SECOND STRING IN SUBROUTINE AUTOPRGROM:
+;LOW 2 BITS - ALGORITHM.
+;
+PS2716:	
+	DB	((OEEN + A11VPP) SHL 4) + (ROMA12 + ROMA13)
+	DB	((VPPEN + VCC5V + VCCEN) SHL 4) + 0
+;PS2732:
+	DB	ROMA13
+	DB	((VPPEN + VCC5V + VCCEN) SHL 4) + 1
+;PS2764:
+	DB	((OEEN + A15VPP) SHL 4) + (ROMA13 OR ROMA14 OR ROMA15)
+	DB	((VPPEN + VCC6V + VCCEN) SHL 4) + 1
+;PS27128:
+	DB	((OEEN + A15VPP) SHL 4) + (ROMA14 + ROMA15)
+	DB	((VPPEN + VCC6V + VCCEN) SHL 4) + 1
+;PS27256:
+	DB	((OEEN + A15VPP) SHL 4) + ROMA15
+	DB	((VPPEN + VCC6V + VCCEN) SHL 4) + 1
+;PS27512:
+	DB	0
+	DB	((VPPEN + VCC6V + VCCEN) SHL 4) + 1
+;PS8048:
+	DB	0
+	DB	0
+;PS8051:
+	DB	0
+	DB	0
+;PS8755:
+	DB	ROMA15
+	DB	((VPPEN + VCC5V + VCCEN) SHL 4) + 1
+;PS27C64:
+	DB	((OEEN + A15VPP) SHL 4) + (ROMA13 OR ROMA14 OR ROMA15)
+	DB	((VPPEN + VCC65V + VCCEN) SHL 4) + 1
+;PS27C128:
+	DB	((OEEN + A15VPP) SHL 4) + (ROMA14 + ROMA15)
+	DB	((VPPEN + VCC65V + VCCEN) SHL 4) + 1
+;PS27C256:
+	DB	((OEEN + A15VPP) SHL 4) + ROMA15
+	DB	((VPPEN + VCC65V + VCCEN) SHL 4) + 1
+;PS27C512:
+	DB	0
+	DB	((VPPEN + VCC65V + VCCEN) SHL 4) + 1
+;PS27I16:
+	DB	((OEEN + A11VPP) SHL 4) + (ROMA12 + ROMA13)
+	DB	((VPPEN + VCC5V + VCCEN) SHL 4) + 0
+;
+;---
+;
+ONVCC:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW CJMP)
+
+	JMPP	@A
+;
+;--- TABLE JMP FOR SET VCC
+;
+CJMP:		;SET VCC FOR :
+;
+	DB	(LOW CC2716)	;2716
+	DB	(LOW CC2716)	;2732
+	DB	(LOW CCALL)	;2764
+	DB	(LOW CCALL)	;27128
+	DB	(LOW CCALL)	;27256
+	DB	(LOW CCALL)	;27512
+	DB	(LOW CC8048)	;8048
+	DB	(LOW CCNO)	;8051
+	DB	(LOW CC8755)	;8755
+	DB	(LOW CCALL)	;27C64
+	DB	(LOW CCALL)	;27C128
+	DB	(LOW CCALL)	;27C256
+	DB	(LOW CCALL)	;27C512
+	DB	(LOW CC2716)	;2716 /Intelligent algorithm/
+;
+;---
+;
+CC2716:	JMP	C2716
+CCALL:	JMP	VCCALL
+CCNO:	
+	RET
+;
+CC8048:	
+	MOV	A,#ROMA6	;SET EA TO +5V
+	CALL	O1T1P4
+;
+;TEST SPECIAL FLAG
+;IF FLAG = RDR - SET EO TO 25V
+;IF FLAG = PRG - SET EO TO 5V
+;
+	MOV	A,TMPR
+	JNZ	CCRDR		;IF NOT ZERRO -> PRG REGIME
+	MOV	A,#(OSCA1 + EA8755)
+	JMP	CCPRG
+;	
+CCRDR:	MOV	A,#OSCA1
+CCPRG:	MOVX	@R0,A		;SET OSC
+;
+	MOV	A,#ROMA11	;SET VDD TO +5V
+	CALL	O1T1P5
+;
+	MOV	A,#OEEN
+	CALL	O1T2P6		;SET PROG -> +5V
+;
+	MOV	A,#ROMA0
+	CALL	O1T0P6
+;
+	JMP	VCCALL
+;	
+;
+;
+CC8755:
+	MOV	A,#ROMA1
+	CALL	O1T0P6
+	MOV	A,#(ROMA4 + ROMA7)
+	CALL	O1T1P4
+	MOV	A,#0		;SET ALL BITS TM9 TO ZERRO
+	MOVX	@R0,A
+	ORL	P1,#NOT CSPRG
+	JMP	VCCALL
+;
+C2716:
+	MOV	A,#ROMA11
+	CALL	O1T1P5
+;
+VCCALL:	
+	MOV	A,#VCC5V
+	CALL	O1T2P5
+	MOV	A,#(VCC5V OR VCCEN)
+	CALL	O1T2P5
+;	
+	MOV	R0,#GRP1
+	MOV	A,@R0
+	ADD	A,#-(LOW TGRP1)
+	CLR	C
+	RLC	A		;*2
+	ADD	A,#(LOW PS2716)
+	MOVP	A,@A
+	MOV	R1,#ROMS	;roms:	HIGHT 4 bits - 2p6
+	MOV	@R1,A
+	SWAP	A
+	CALL	O1T2P6
+ 	SWAP	A
+	XRL	A,#ROMA13
+	CALL	O1T1P6
+;
+	ORL	P1,#(V5ORIG OR TXBIT OR (NOT CSPRG))	;SET POWER FOR ORIGINAL CHIP
+	ORL	P2,#(NOT CSORIG)	;Desable CS for original chip
+	ORL	P1,#(V5ORIG OR OEORIG OR TXBIT)	;Desable OE for original chip
+;
+;delay 500ms
+;
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 1000)
+	INC	R0
+	MOV	@R0,#(HIGH 1000)
+	JMP	DELAYM1
+;
+;---
+;
+ONVPP:
+	MOV	R0,#GRP1		;Addr CHIP regime
+	MOV	A,@R0			;CHIP ?
+	ADD	A,#-(LOW TGRP1)		
+	ADD	A,#(LOW PJMP)
+
+	JMPP	@A
+;
+;--- TABLE JMP FOR SET VPP
+;
+PJMP:		;SET VPP FOR :
+;
+	DB	(LOW PPALL)	;2716
+	DB	(LOW PPALL)	;2732
+	DB	(LOW PPALL)	;2764
+	DB	(LOW PPALL)	;27128
+	DB	(LOW PPALL)	;27256
+	DB	(LOW PPALL)	;27512
+	DB	(LOW PP8048)	;8048
+	DB	(LOW PPNO)	;8051
+	DB	(LOW PP8755)	;8755
+	DB	(LOW PPALL)	;27C64
+	DB	(LOW PPALL)	;27C128
+	DB	(LOW PPALL)	;27C256
+	DB	(LOW PPALL)	;27C512
+	DB	(LOW PPALL)	;2716 /Intelligent algorithm/
+;
+;---
+;
+PPNO:	RET
+PPALL:
+	CALL	SETVPP
+;
+	MOV	R0,#GRP1
+	MOV	A,@R0
+	ADD	A,#-(LOW TGRP1)
+	CLR	C
+	RLC	A		;*2
+	ADD	A,#(LOW PS2716)
+	INC	A
+	MOVP	A,@A
+;
+	JB0	PPALLC
+	ANL	P1,#CSPRG
+	JMP	PPALLA
+PPALLC:
+	ORL	P1,#NOT CSPRG
+PPALLA:
+	MOV	R0,#ALGOR
+	MOV	A,@R0
+	SWAP	A
+	CALL	O1T2P5
+;
+;DELAY 500MS
+;
+	MOV	R0,#DELC
+	MOV	@R0,#(LOW 1000)
+	INC	R0
+	MOV	@R0,#(HIGH 1000)
+	JMP	DELAYM1
+;
+;---
+;
+PP8755:	JMP	JPP8755
+PP8048:	JMP	JPP8048
+;
+;--- SET VPP
+;
+;---!!! attentions!!! this routine must be state at PS2716 address table
+;
+SETVPP:	MOV	R0,#GRP0
+	MOV	A,@R0
+	MOVP3	A,@A
+	SWAP	A
+	JMP	O1T2P4	
+;---
+;
+;---	LOAD FOR AUTO_PRG_ ROUTINE:
+;	ALGORITHM 
+;	VCC
+;---!!! attentions!!! this routine must be state at PS2716 address table
+;
+LOADAL:
+	MOV	R0,#GRP1
+	MOV	R1,#ALGOR
+	MOV	A,@R0
+	ADD	A,#-(LOW TGRP1)
+	CLR	C
+	RLC	A		;*2
+	ADD	A,#(LOW PS2716)
+	INC	A
+	MOVP	A,@A
+	MOV	@R1,A
+	JB0	LINTEL		;IF ZERRO - NORMAL PRG ALGORITHM
+;
+	MOV	R0,#NPULSE
+	MOV	@R0,#1		;ONE IMPULSE FOR NORMAL ALG
+	MOV	R0,#IPULSE
+	MOV	@R0,#(LOW 500)	;50MS - IMPULS'S WIDHT
+	INC	R0
+	MOV	@R0,#(HIGH 500)
+	JMP	LARET
+LINTEL:
+	MOV	R0,#NPULSE
+	MOV	@R0,#15		;IF ONE - INTELLIGENT ALGORITHM
+;
+	MOV	R0,#IPULSE
+	MOV	@R0,#(LOW 10)	;1MS PRG INITIAL PULSE WIDHT
+	INC	R0
+	MOV	@R0,#(HIGH 10)
+;
+	MOV	R0,#OPULSE
+	MOV	@R0,#(LOW 30)	;3MS PRG OVERPROGRAM PULSE WIDHT
+	INC	R0
+	MOV	@R0,#(HIGH 30)
+;
+LARET:
+	RET
+;
+	
+;
+	ORG	0F10H
+;
+;	
+;----------------------------
+;--- TEST SUBROUTINES
+;----------------------------
+;
+;--- TABLE JMP FOR SUBROUTINES PRG
+;
+TESTJMP:
+	DB	(LOW TESTVPP)
+	DB	(LOW TESTVCC)
+	DB	(LOW TESTPINS)
+	DB	(LOW TESTA4)
+
+RUNTEST:
+	MOV	R0,#DATA+2	;Test revime
+	MOV	A,@R0
+	ADD	A,#(LOW TESTJMP)
+	JMPP	@A
+;
+;----------------------------
+;--- TEST A4/VPP
+;----------------------------
+;
+TESTA4:
+	CALL	TESTVCC
+	MOV	A,#ROMA4
+	CALL	O1T1P4
+	RET
+;
+;----------------------------
+;--- TEST VPP
+;----------------------------
+;
+TESTVPP:
+	MOV	R0,#DATA+4
+	MOV	A,@R0
+TEST4R:	CALL	O1T2P4
+	MOV	A,#VPPEN
+	CALL	O1T2P5
+	MOV	A,#ROMA15
+	CALL	O1T1P6
+	MOV	A,#A15VPP
+	CALL	O1T2P6
+	RET
+;
+;----------------------------
+;--- TEST VCC
+;----------------------------
+;
+TESTVCC:
+	MOV	R0,#DATA+4
+	MOV	A,@R0
+	CALL	O1T2P5
+	RET
+;
+;---
+;
+CHIPN:
+	DB	(LOW CHIP0)
+	DB	(LOW CHIP0)
+	DB	(LOW CHIP2)
+;
+;---
+;
+PINS0JMP:
+	DB	(LOW TRA15)	;CHIP 0, PIN 1
+	DB	(LOW TRA12)	;CHIP 0, PIN 2
+	DB	(LOW TRA7)	;CHIP 0, PIN 3
+	DB	(LOW TRA6)	;CHIP 0, PIN 4
+	DB	(LOW TRA5)	;CHIP 0, PIN 5
+	DB	(LOW TRA4)	;CHIP 0, PIN 6
+	DB	(LOW TRA3)	;CHIP 0, PIN 7
+	DB	(LOW TRA2)	;CHIP 0, PIN 8
+	DB	(LOW TRA1)	;CHIP 0, PIN 9
+	DB	(LOW TRA0)	;CHIP 0, PIN 10
+	DB	(LOW TRD0)	;CHIP 0, PIN 11
+	DB	(LOW TRD1)	;CHIP 0, PIN 12
+	DB	(LOW TRD2)	;CHIP 0, PIN 13
+	DB	00		;CHIP 0, PIN 14
+;
+	DB	(LOW TRD3)	;CHIP 0, PIN 15
+	DB	(LOW TRD4)	;CHIP 0, PIN 16
+	DB	(LOW TRD5)	;CHIP 0, PIN 17
+	DB	(LOW TRD6)	;CHIP 0, PIN 18
+	DB	(LOW TRD7)	;CHIP 0, PIN 19
+	DB	(LOW TRCS)	;CHIP 0, PIN 20
+	DB	(LOW TRA10)	;CHIP 0, PIN 21
+	DB	(LOW TROE)	;CHIP 0, PIN 22
+	DB	(LOW TRA11)	;CHIP 0, PIN 23
+	DB	(LOW TRA9)	;CHIP 0, PIN 24
+	DB	(LOW TRA8)	;CHIP 0, PIN 25
+	DB	(LOW TRA13)	;CHIP 0, PIN 26
+	DB	(LOW TRA14)	;CHIP 0, PIN 27
+;	
+;	
+PINS2JMP:
+	DB	(LOW TRA0)	;CHIP 2, PIN 1
+;
+;----------------------------
+;--- TEST PINS
+;----------------------------
+;
+TESTPINS:
+	CALL	RESET
+	MOV	R0,#DATA+4	;Test revime
+	MOV	A,@R0
+	ADD	A,#(LOW CHIPN)
+	JMPP	@A
+;
+CHIP0:
+	MOV	R0,#DATA+6
+	MOV	A,@R0
+	DEC	A
+	ADD	A,#(LOW PINS0JMP)
+	JMPP	@A
+;
+CHIP2:
+	MOV	R0,#DATA+6
+	DEC	A
+	MOV	A,@R0
+	ADD	A,#(LOW PINS2JMP)
+	JMPP	@A
+;
+;---
+;
+TRA15:
+	MOV	TESTR,#ROMA15
+	JMP	M1P6
+TRA12:
+	MOV	TESTR,#ROMA12
+	JMP	M1P6
+TRA7:
+	MOV	TESTR,#ROMA7
+	JMP	M1P4
+TRA6:
+	MOV	TESTR,#ROMA6
+	JMP	M1P4	
+TRA5:
+	MOV	TESTR,#ROMA5
+	JMP	M1P4
+TRA4:
+	MOV	TESTR,#ROMA4
+	JMP	M1P4
+TRA3:
+	MOV	TESTR,#ROMA3
+	JMP	M0P6
+TRA2:
+	MOV	TESTR,#ROMA2
+	JMP	M0P6
+TRA1:
+	MOV	TESTR,#ROMA1
+	JMP	M0P6
+TRA0:
+	MOV	TESTR,#ROMA0
+	JMP	M0P6
+TRD0:
+	MOV	TESTR,#ROMD0
+	JMP	M0P4
+TRD1:
+	MOV	TESTR,#ROMD1
+	JMP	M0P4
+TRD2:
+	MOV	TESTR,#ROMD2
+	JMP	M0P4
+TRD3:
+	MOV	TESTR,#ROMD3
+	JMP	M0P4
+TRD4:
+	MOV	TESTR,#ROMD4
+	JMP	M0P5
+TRD5:
+	MOV	TESTR,#ROMD5
+	JMP	M0P5
+TRD6:
+	MOV	TESTR,#ROMD6
+	JMP	M0P5
+TRD7:
+	MOV	TESTR,#ROMD7
+	JMP	M0P5
+TRCS:
+	ORL	P2,#NOT CSORIG
+	ORL	P1,#NOT CSPRG
+	CALL	RESRX
+	ANL	P2,#CSORIG
+	ANL	P1,#CSPRG
+	JZ	TRCS
+	RET
+TRA10:
+	MOV	TESTR,#ROMA10
+	JMP	M1P5
+TROE:
+	ORL	P1,#OEORIG
+	MOV	A,#OEEN
+	CALL	O1T2P6
+	CALL	RESRX
+	CALL	O1T2P6
+	ANL	P1,#NOT OEORIG
+	JZ	TROE
+	RET
+TRA11:
+	MOV	TESTR,#ROMA11
+	JMP	M1P5
+TRA9:
+	MOV	TESTR,#ROMA9
+	JMP	M1P5
+TRA8:
+	MOV	TESTR,#ROMA8
+	JMP	M1P5
+TRA13:
+	ORL	P1,#V5ORIG
+	MOV	A,#VCCEN
+	CALL	O1T2P5
+	MOV	TESTR,#ROMA13
+	JMP	M1P6
+TRA14:	
+	MOV	TESTR,#ROMA14
+	JMP	M1P6
+;
+;
+;!!!_end
+;
+;--- END OF PROGRAMM BANK1
+;
+	END
+;
